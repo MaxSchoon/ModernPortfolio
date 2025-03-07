@@ -12,7 +12,7 @@ import argparse
 import time
 import sys
 from typing import List, Dict, Tuple
-from utils import format_ticker, is_valid_ticker_format  # Import utility functions
+from utils import format_ticker  # Import utility functions
 
 def validate_ticker(ticker: str, verbose: bool = True) -> Tuple[bool, str, str]:
     """

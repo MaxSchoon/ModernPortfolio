@@ -19,7 +19,7 @@ function run_batch_fetch() {
     echo -e "\n${YELLOW}Running batch fetcher to prepare data...${NC}"
     echo -e "${YELLOW}This will fetch data in small batches with delays to avoid rate limits${NC}\n"
     
-    python batch_fetcher.py --file tickers.csv --batch-size 3 --delay-min 2 --delay-max 5 --retry 3
+    python3 batch_fetcher.py --file tickers.csv --batch-size 3 --delay-min 2 --delay-max 5 --retry 3
     
     if [ $? -eq 0 ]; then
         echo -e "\n${GREEN}✅ Data fetching completed successfully${NC}"
@@ -61,7 +61,7 @@ fi
 YEARS=${2:-5}
 
 echo -e "\n${GREEN}Running optimizer with ${YEARS} years of data...${NC}"
-python ModernPortfolio.py --years ${YEARS} ${CACHE_OPT} ${BATCH_OPT} ${CLEAR_OPT}
+python3 ModernPortfolio.py --years ${YEARS} ${CACHE_OPT} ${BATCH_OPT} ${CLEAR_OPT}
 
 if [ $? -eq 0 ]; then
     echo -e "\n${GREEN}✅ Optimization completed successfully${NC}"
