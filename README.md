@@ -17,7 +17,7 @@ This tool helps investors create optimized portfolios using historical stock dat
 
 ```bash
 # Clone the repository
-git clone https://github.com/MaxSchoon/modern-portfolio-optimizer.git
+git clone https://github.com/MaxSchoon/ModernPortfolio.git
 cd modern-portfolio-optimizer
 
 # Install required dependencies
