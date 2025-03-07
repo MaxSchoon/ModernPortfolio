@@ -14,7 +14,6 @@ import glob
 from csv_cache_manager import CSVDataCache
 from scipy.optimize import minimize
 import argparse
-import sys
 import json
 
 class PortfolioTroubleshooter:

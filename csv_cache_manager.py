@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import json
 import glob
-from typing import Optional, Dict, List, Any, Tuple
+from typing import Any, Optional, Dict
 
 class CSVDataCache:
     """

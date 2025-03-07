@@ -5,15 +5,8 @@ from scipy.optimize import minimize
 from datetime import datetime, timedelta
 from typing import Tuple, List, Dict, Optional
 import os
-import time
 import argparse
-import sys
-import random
-import pickle
 import json
-import requests.exceptions
-from urllib3.exceptions import HTTPError
-import ssl
 import matplotlib.pyplot as plt
 
 # Import the CSV cache manager
