@@ -39,11 +39,11 @@ class DataFetcher:
     """
     
     def __init__(self, cache_dir: str = "data_cache", 
-                 batch_size: int = 10,  # Increased from 5 to 10
+                 batch_size: int = 50,  # Increased from 5 to 50
                  delay_between_batches: float = 5.0,  # Simplified to constant 5 seconds
                  retry_count: int = 3, 
                  years: int = 5,
-                 max_workers: int = 3,
+                 max_workers: int = 10,
                  throttle_calls: int = 20,  # Increased to match larger batch size
                  throttle_period: int = 20):  # Reduced from 60 to 20 seconds
         """

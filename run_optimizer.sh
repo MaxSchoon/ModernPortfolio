@@ -30,9 +30,30 @@ function run_batch_fetch() {
     fi
 }
 
+# Function to standardize the cache
+function standardize_cache() {
+    echo -e "\n${YELLOW}Standardizing cache data formats...${NC}"
+    echo -e "${YELLOW}This will fix date formats and remove any future dates in the cache${NC}\n"
+    
+    python3 cache_standardize.py
+    
+    if [ $? -eq 0 ]; then
+        echo -e "\n${GREEN}✅ Cache standardization completed successfully${NC}"
+        return 0
+    else
+        echo -e "\n${RED}❌ Error standardizing cache${NC}"
+        return 1
+    fi
+}
+
 # Check which mode to run in
 if [ "$1" == "--fetch-only" ]; then
     run_batch_fetch
+    exit $?
+fi
+
+if [ "$1" == "--standardize-cache" ]; then
+    standardize_cache
     exit $?
 fi
 
