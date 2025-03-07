@@ -152,10 +152,10 @@
   "lastDividendDate": 1725580800,
   "quoteType": "EQUITY",
   "currentPrice": 101.99,
-  "targetHighPrice": 160.56845,
-  "targetLowPrice": 92.001305,
-  "targetMeanPrice": 120.90365,
-  "targetMedianPrice": 120.35998,
+  "targetHighPrice": 160.57288,
+  "targetLowPrice": 92.00384,
+  "targetMeanPrice": 120.90698,
+  "targetMedianPrice": 120.3633,
   "recommendationMean": 1.36667,
   "recommendationKey": "strong_buy",
   "numberOfAnalystOpinions": 30,
@@ -186,33 +186,6 @@
   "quoteSourceName": "Nasdaq Real Time Price",
   "triggerable": true,
   "customPriceAlertConfidence": "HIGH",
-  "marketState": "PRE",
-  "regularMarketChangePercent": 0.049246144,
-  "regularMarketPrice": 101.99,
-  "longName": "NetEase, Inc.",
-  "shortName": "NetEase, Inc.",
-  "corporateActions": [
-    {
-      "header": "Dividend",
-      "message": "NTES announced a cash dividend of 1.22 with an ex-date of Mar. 6, 2025",
-      "meta": {
-        "eventType": "DIVIDEND",
-        "dateEpochMs": 1741237200000,
-        "amount": "1.22"
-      }
-    }
-  ],
-  "preMarketTime": 1741346227,
-  "regularMarketTime": 1741294801,
-  "exchange": "NMS",
-  "messageBoardId": "finmb_416512",
-  "exchangeTimezoneName": "America/New_York",
-  "exchangeTimezoneShortName": "EST",
-  "gmtOffSetMilliseconds": -18000000,
-  "market": "us_market",
-  "esgPopulated": false,
-  "hasPrePostMarketData": true,
-  "firstTradeDateMilliseconds": 962371800000,
   "preMarketChange": 1.8100052,
   "preMarketChangePercent": 1.774689,
   "preMarketPrice": 103.8,
@@ -245,6 +218,33 @@
   "exchangeDataDelayedBy": 0,
   "averageAnalystRating": "1.4 - Strong Buy",
   "cryptoTradeable": false,
+  "shortName": "NetEase, Inc.",
+  "longName": "NetEase, Inc.",
+  "marketState": "PRE",
+  "exchange": "NMS",
+  "messageBoardId": "finmb_416512",
+  "exchangeTimezoneName": "America/New_York",
+  "exchangeTimezoneShortName": "EST",
+  "gmtOffSetMilliseconds": -18000000,
+  "market": "us_market",
+  "esgPopulated": false,
+  "corporateActions": [
+    {
+      "header": "Dividend",
+      "message": "NTES announced a cash dividend of 1.22 with an ex-date of Mar. 6, 2025",
+      "meta": {
+        "eventType": "DIVIDEND",
+        "dateEpochMs": 1741237200000,
+        "amount": "1.22"
+      }
+    }
+  ],
+  "preMarketTime": 1741346227,
+  "regularMarketTime": 1741294801,
+  "regularMarketChangePercent": 0.049246144,
+  "regularMarketPrice": 101.99,
+  "hasPrePostMarketData": true,
+  "firstTradeDateMilliseconds": 962371800000,
   "displayName": "NetEase",
   "trailingPegRatio": 1.1366
 }

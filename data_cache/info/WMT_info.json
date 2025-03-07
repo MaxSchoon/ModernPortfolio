@@ -225,16 +225,39 @@
   "language": "en-US",
   "region": "US",
   "typeDisp": "Equity",
-  "quoteSourceName": "Delayed Quote",
   "triggerable": true,
   "customPriceAlertConfidence": "HIGH",
+  "exchange": "NYQ",
+  "preMarketTime": 1741350332,
   "hasPrePostMarketData": true,
   "firstTradeDateMilliseconds": 83597400000,
-  "preMarketChange": -0.20999908,
-  "preMarketChangePercent": -0.22189252,
-  "preMarketPrice": 94.43,
+  "preMarketChange": -0.1800003,
+  "preMarketChangePercent": -0.19019474,
+  "preMarketPrice": 94.46,
   "regularMarketChange": -1.34,
   "regularMarketDayRange": "94.1833 - 96.18",
+  "corporateActions": [
+    {
+      "header": "Dividend",
+      "message": "WMT announced a cash dividend of 0.235 with an ex-date of Mar. 21, 2025",
+      "meta": {
+        "eventType": "DIVIDEND",
+        "dateEpochMs": 1742533200000,
+        "amount": "0.235"
+      }
+    }
+  ],
+  "regularMarketTime": 1741294802,
+  "messageBoardId": "finmb_313055",
+  "exchangeTimezoneName": "America/New_York",
+  "exchangeTimezoneShortName": "EST",
+  "gmtOffSetMilliseconds": -18000000,
+  "market": "us_market",
+  "esgPopulated": false,
+  "shortName": "Walmart Inc.",
+  "longName": "Walmart Inc.",
+  "marketState": "PRE",
+  "cryptoTradeable": false,
   "fullExchangeName": "NYSE",
   "averageDailyVolume3Month": 18062391,
   "fiftyTwoWeekLowChange": 36.079998,
@@ -254,31 +277,6 @@
   "epsForward": 2.72,
   "epsCurrentYear": 2.6471,
   "priceEpsCurrentYear": 35.752335,
-  "marketState": "PRE",
-  "regularMarketChangePercent": -1.39613,
-  "regularMarketPrice": 94.64,
-  "corporateActions": [
-    {
-      "header": "Dividend",
-      "message": "WMT announced a cash dividend of 0.235 with an ex-date of Mar. 21, 2025",
-      "meta": {
-        "eventType": "DIVIDEND",
-        "dateEpochMs": 1742533200000,
-        "amount": "0.235"
-      }
-    }
-  ],
-  "preMarketTime": 1741348990,
-  "regularMarketTime": 1741294802,
-  "exchange": "NYQ",
-  "messageBoardId": "finmb_313055",
-  "exchangeTimezoneName": "America/New_York",
-  "exchangeTimezoneShortName": "EST",
-  "gmtOffSetMilliseconds": -18000000,
-  "market": "us_market",
-  "esgPopulated": false,
-  "shortName": "Walmart Inc.",
-  "longName": "Walmart Inc.",
   "fiftyDayAverageChange": -1.360199,
   "fiftyDayAverageChangePercent": -0.01416871,
   "twoHundredDayAverageChange": 12.936249,
@@ -286,7 +284,8 @@
   "sourceInterval": 15,
   "exchangeDataDelayedBy": 0,
   "averageAnalystRating": "1.6 - Buy",
-  "cryptoTradeable": false,
+  "regularMarketChangePercent": -1.39613,
+  "regularMarketPrice": 94.64,
   "displayName": "Walmart",
   "trailingPegRatio": 2.9908
 }

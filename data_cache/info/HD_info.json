@@ -225,8 +225,38 @@
   "quoteSourceName": "Delayed Quote",
   "triggerable": true,
   "customPriceAlertConfidence": "HIGH",
-  "shortName": "Home Depot, Inc. (The)",
   "longName": "The Home Depot, Inc.",
+  "regularMarketTime": 1741294802,
+  "exchange": "NYQ",
+  "messageBoardId": "finmb_278679",
+  "exchangeTimezoneName": "America/New_York",
+  "exchangeTimezoneShortName": "EST",
+  "gmtOffSetMilliseconds": -18000000,
+  "market": "us_market",
+  "esgPopulated": false,
+  "regularMarketChangePercent": -1.19581,
+  "regularMarketPrice": 381.73,
+  "hasPrePostMarketData": true,
+  "firstTradeDateMilliseconds": 370013400000,
+  "marketState": "PRE",
+  "corporateActions": [
+    {
+      "header": "Dividend",
+      "message": "HD announced a cash dividend of 2.30 with an ex-date of Mar. 13, 2025",
+      "meta": {
+        "eventType": "DIVIDEND",
+        "dateEpochMs": 1741842000000,
+        "amount": "2.30"
+      }
+    }
+  ],
+  "preMarketTime": 1741350268,
+  "shortName": "Home Depot, Inc. (The)",
+  "preMarketChange": 1.4100037,
+  "preMarketChangePercent": 0.36937198,
+  "preMarketPrice": 383.14,
+  "regularMarketChange": -4.62,
+  "regularMarketDayRange": "380.73 - 387.7381",
   "fullExchangeName": "NYSE",
   "averageDailyVolume3Month": 3311432,
   "fiftyTwoWeekLowChange": 57.960022,
@@ -254,36 +284,6 @@
   "exchangeDataDelayedBy": 0,
   "averageAnalystRating": "1.9 - Buy",
   "cryptoTradeable": false,
-  "hasPrePostMarketData": true,
-  "firstTradeDateMilliseconds": 370013400000,
-  "preMarketChange": 1.2599792,
-  "preMarketChangePercent": 0.3300708,
-  "preMarketPrice": 382.99,
-  "regularMarketChange": -4.62,
-  "regularMarketDayRange": "380.73 - 387.7381",
-  "corporateActions": [
-    {
-      "header": "Dividend",
-      "message": "HD announced a cash dividend of 2.30 with an ex-date of Mar. 13, 2025",
-      "meta": {
-        "eventType": "DIVIDEND",
-        "dateEpochMs": 1741842000000,
-        "amount": "2.30"
-      }
-    }
-  ],
-  "preMarketTime": 1741348935,
-  "regularMarketTime": 1741294802,
-  "exchange": "NYQ",
-  "messageBoardId": "finmb_278679",
-  "exchangeTimezoneName": "America/New_York",
-  "exchangeTimezoneShortName": "EST",
-  "gmtOffSetMilliseconds": -18000000,
-  "market": "us_market",
-  "esgPopulated": false,
-  "regularMarketChangePercent": -1.19581,
-  "regularMarketPrice": 381.73,
-  "marketState": "PRE",
   "displayName": "The Home Depot",
   "trailingPegRatio": 4.3995
 }

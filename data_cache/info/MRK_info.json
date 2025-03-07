@@ -228,38 +228,17 @@
   "language": "en-US",
   "region": "US",
   "typeDisp": "Equity",
+  "quoteSourceName": "Delayed Quote",
   "triggerable": true,
   "customPriceAlertConfidence": "HIGH",
-  "shortName": "Merck & Company, Inc.",
-  "longName": "Merck & Co., Inc.",
-  "preMarketTime": 1741348919,
-  "regularMarketTime": 1741294802,
-  "regularMarketChangePercent": 0.869189,
-  "regularMarketPrice": 94.0,
-  "exchange": "NYQ",
   "messageBoardId": "finmb_288502",
   "exchangeTimezoneName": "America/New_York",
   "exchangeTimezoneShortName": "EST",
   "gmtOffSetMilliseconds": -18000000,
   "market": "us_market",
-  "esgPopulated": false,
-  "corporateActions": [
-    {
-      "header": "Dividend",
-      "message": "MRK announced a cash dividend of 0.81 with an ex-date of Mar. 17, 2025",
-      "meta": {
-        "eventType": "DIVIDEND",
-        "dateEpochMs": 1742187600000,
-        "amount": "0.81"
-      }
-    }
-  ],
+  "regularMarketChangePercent": 0.869189,
+  "regularMarketPrice": 94.0,
   "marketState": "PRE",
-  "hasPrePostMarketData": true,
-  "firstTradeDateMilliseconds": -252322200000,
-  "preMarketChange": -0.44000244,
-  "preMarketChangePercent": -0.4680877,
-  "preMarketPrice": 93.56,
   "regularMarketChange": 0.809998,
   "regularMarketDayRange": "91.78 - 94.05",
   "fullExchangeName": "NYSE",
@@ -289,6 +268,28 @@
   "exchangeDataDelayedBy": 0,
   "averageAnalystRating": "2.0 - Buy",
   "cryptoTradeable": false,
+  "preMarketChange": -0.33999634,
+  "preMarketChangePercent": -0.36169824,
+  "preMarketPrice": 93.66,
+  "hasPrePostMarketData": true,
+  "firstTradeDateMilliseconds": -252322200000,
+  "shortName": "Merck & Company, Inc.",
+  "longName": "Merck & Co., Inc.",
+  "corporateActions": [
+    {
+      "header": "Dividend",
+      "message": "MRK announced a cash dividend of 0.81 with an ex-date of Mar. 17, 2025",
+      "meta": {
+        "eventType": "DIVIDEND",
+        "dateEpochMs": 1742187600000,
+        "amount": "0.81"
+      }
+    }
+  ],
+  "preMarketTime": 1741350348,
+  "regularMarketTime": 1741294802,
+  "exchange": "NYQ",
+  "esgPopulated": false,
   "displayName": "Merck &",
   "trailingPegRatio": 0.8622
 }
