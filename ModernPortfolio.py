@@ -50,7 +50,7 @@ except ImportError:
             # Check column names (case insensitive)
             ticker_column = None
             for col in df.columns:
-                if col.lower() == 'ticker':
+                if (col.lower() == 'ticker'):
                     ticker_column = col
                     break
                     
@@ -325,12 +325,11 @@ class PortfolioOptimizer:
         else:
             print("\nCache disabled. All data will be fetched from Yahoo Finance.")
         
-        # Handle synthetic assets (CASH/TBILLS)
-        for ticker in self.tickers:
-            if ticker in ['CASH', 'TBILLS']:
-                self._create_synthetic_asset(ticker, start_date, end_date)
-                continue
-                
+        # First skip synthetic assets and only get real ticker data
+        real_tickers = [t for t in self.tickers if t not in ['CASH', 'TBILLS']]
+        
+        # Fetch real ticker data
+        for ticker in real_tickers:
             # For real tickers, try to load from cache or fetch them
             if use_cache:
                 cached_data = self.cache.get_price_data(ticker, max_age_days=30)
@@ -416,38 +415,70 @@ class PortfolioOptimizer:
             except Exception as e:
                 print(f"❌ Error fetching {ticker}: {str(e)}")
                 continue
-                
+        
+        # Once real data is fetched, create synthetic assets using the same date range
+        synthetic_tickers = [t for t in self.tickers if t in ['CASH', 'TBILLS']]
+        if synthetic_tickers and not self.price_data.empty:
+            # Get common date range from real data
+            common_index = self.price_data.index
+            
+            for ticker in synthetic_tickers:
+                self._create_synthetic_asset(ticker, common_index)
+                    
         # Remove tickers that failed to load
-        failed_tickers = [ticker for ticker in self.tickers if ticker not in self.price_data.columns and ticker not in ['CASH', 'TBILLS']]
+        failed_tickers = [ticker for ticker in self.tickers if ticker not in self.price_data.columns]
         if failed_tickers:
             print(f"\n❌ The following tickers failed to load: {', '.join(failed_tickers)}")
-            self.tickers = [t for t in self.tickers if t in self.price_data.columns or t in ['CASH', 'TBILLS']]
-            
-        # Add synthetic assets if needed
-        for ticker in self.tickers:
-            if ticker in ['CASH', 'TBILLS'] and ticker not in self.price_data.columns:
-                self._create_synthetic_asset(ticker, start_date, end_date)
+            self.tickers = [t for t in self.tickers if t in self.price_data.columns]
                 
         print(f"\n✅ Successfully loaded data for {len(self.tickers)} tickers")
 
-    def _create_synthetic_asset(self, ticker: str, start_date, end_date):
-        """Create synthetic data for cash-like assets"""
-        date_range = pd.date_range(start=start_date, end=end_date, freq='B')
+    def _create_synthetic_asset(self, ticker: str, common_index=None):
+        """
+        Create synthetic data for cash-like assets using the common date index
+        from real ticker data to ensure alignment
+        
+        Parameters:
+            ticker: 'CASH' or 'TBILLS'
+            common_index: Date index to use (from real tickers)
+        """
+        # If no common index is provided, create a generic one
+        if common_index is None:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=365*self.years)
+            common_index = pd.date_range(start=start_date, end=end_date, freq='B')
+            print(f"⚠️ Creating generic date range for {ticker} with {len(common_index)} days")
+        else:
+            print(f"🔄 Creating {ticker} with {len(common_index)} days aligned to other tickers")
         
         # Set return based on asset type
         if ticker == 'CASH':
             rate = self.risk_free_rate
-            variance = 1e-8
+            variance = 1e-10  # Even smaller variance for cash
         else:  # TBILLS
             rate = self.risk_free_rate * 1.02  # Slightly higher than cash
-            variance = 1e-6  # Slightly more volatile than cash
+            variance = 1e-8   # Very small but slightly more volatile than cash
         
+        # Calculate daily return
         daily_return = (1 + rate) ** (1/252) - 1
-        prices = (1 + daily_return) ** np.arange(len(date_range))
-        self.price_data[ticker] = pd.Series(prices * (1 + np.random.normal(0, np.sqrt(variance), len(date_range))), 
-                                          index=date_range)
-        self.div_data[ticker] = pd.Series(0.0, index=date_range, dtype='float64')
-        print(f"💰 {ticker}: Synthetic data generated successfully")
+        
+        # Generate smooth price series with minimal noise
+        days = len(common_index)
+        prices = np.ones(days)
+        
+        # Apply compounding with tiny random noise
+        for i in range(1, days):
+            daily_noise = np.random.normal(0, np.sqrt(variance))
+            prices[i] = prices[i-1] * (1 + daily_return + daily_noise)
+        
+        # Create price series with the common index
+        price_series = pd.Series(prices, index=common_index)
+        self.price_data[ticker] = price_series
+        
+        # Create zero-dividend series
+        self.div_data[ticker] = pd.Series(0.0, index=common_index)
+        
+        print(f"💰 {ticker}: Synthetic data generated successfully ({len(price_series)} days)")
 
     def _plot_price_data(self, ticker: str, price_data: pd.Series) -> None:
         """Plot price data and save to file"""
@@ -499,36 +530,49 @@ class PortfolioOptimizer:
             raise ValueError("Failed to align price data across tickers.")
         
         # Use the aligned data
-        price_df = aligned_data['prices']
+        prices_df = aligned_data['prices']
         div_df = aligned_data['dividends']
         
-        # Calculate returns
-        price_returns = price_df.pct_change().fillna(0)
-        div_returns = (div_df / price_df.shift(1)).fillna(0)
+        # Identify synthetic assets
+        synthetic_tickers = [t for t in self.tickers if t in ['CASH', 'TBILLS']]
+        
+        # Calculate returns for regular tickers
+        price_returns = prices_df.pct_change().fillna(0)
+        div_returns = (div_df / prices_df.shift(1)).fillna(0)
         total_returns = price_returns.add(div_returns)
-    
-        # Set cash returns explicitly
-        if 'CASH' in self.tickers:
-            daily_rf = (1 + self.risk_free_rate) ** (1/252) - 1
-            total_returns['CASH'] = daily_rf
-            
-        if 'TBILLS' in self.tickers:
-            daily_rf = (1 + self.risk_free_rate * 1.02) ** (1/252) - 1
-            total_returns['TBILLS'] = daily_rf
-    
+        
+        # Override returns for synthetic assets with their theoretical returns
+        for ticker in synthetic_tickers:
+            if ticker in total_returns.columns:
+                # Set constant daily return for synthetic assets
+                if ticker == 'CASH':
+                    daily_rf = (1 + self.risk_free_rate) ** (1/252) - 1
+                    total_returns[ticker] = daily_rf
+                elif ticker == 'TBILLS':
+                    daily_rf = (1 + self.risk_free_rate * 1.02) ** (1/252) - 1
+                    total_returns[ticker] = daily_rf
+        
         # Calculate annualized returns
         self.mean_returns = total_returns.mean() * 252
-    
+        
         # Calculate covariance matrix
         self.cov_matrix = total_returns.cov() * 252
-    
+        
         # Ensure covariance matrix is well-behaved for cash-like assets
-        for ticker in ['CASH', 'TBILLS']:
+        for ticker in synthetic_tickers:
             if ticker in self.tickers:
-                idx = self.tickers.index(ticker)
+                # Get the index for this ticker
+                idx = list(self.tickers).index(ticker)
+                
+                # Override covariance values
                 variance = 1e-8 if ticker == 'CASH' else 1e-6
-                self.cov_matrix.iloc[idx, :] = 0
-                self.cov_matrix.iloc[:, idx] = 0
+                
+                # Set near-zero correlation with all other assets
+                for i in range(len(self.tickers)):
+                    self.cov_matrix.iloc[idx, i] = 0
+                    self.cov_matrix.iloc[i, idx] = 0
+                    
+                # Set tiny variance for the asset itself
                 self.cov_matrix.iloc[idx, idx] = variance
         
         # Print return metrics for debugging
@@ -547,7 +591,7 @@ class PortfolioOptimizer:
         print(f"Returns summary saved to {summary_file}")
         
         # Save correlation matrix
-        if total_returns is not None:  # Add this check
+        if total_returns is not None:
             corr_matrix = total_returns.corr()
             corr_file = os.path.join(self.output_dir, "correlations.csv")
             corr_matrix.to_csv(corr_file)
@@ -564,36 +608,71 @@ class PortfolioOptimizer:
         """Align price and dividend data to ensure all tickers have data for the same dates"""
         print("Aligning data across tickers...")
         
-        # Extract price and dividend DataFrames
-        price_df = self.price_data[self.tickers].copy()
-        div_df = self.div_data[self.tickers].copy() if all(t in self.div_data for t in self.tickers) else None
+        # First identify synthetic assets
+        synthetic_tickers = [t for t in self.tickers if t in ['CASH', 'TBILLS']]
+        real_tickers = [t for t in self.tickers if t not in ['CASH', 'TBILLS']]
         
-        # If dividend data is missing for some tickers, create it with zeros
-        if div_df is None:
-            div_df = pd.DataFrame(0.0, index=price_df.index, columns=self.tickers)
-            for ticker in self.tickers:
-                if ticker in self.div_data:
-                    common_idx = price_df.index.intersection(self.div_data[ticker].index)
-                    div_df.loc[common_idx, ticker] = self.div_data[ticker].loc[common_idx]
+        # Handle case where there are no real tickers (only synthetic)
+        if not real_tickers:
+            print("⚠️ No real tickers found, only synthetic assets")
+            
+            # In this case, just use the synthetic data as is
+            price_df = self.price_data[self.tickers].copy()
+            div_df = self.div_data[self.tickers].copy()
+            
+            return {
+                'prices': price_df,
+                'dividends': div_df
+            }
         
-        # Fill missing prices with forward/backward fill
+        # Process real ticker data
+        price_df = self.price_data[real_tickers].copy()
+        div_df = pd.DataFrame(index=price_df.index)
+        
+        # Add dividend data for real tickers
+        for ticker in real_tickers:
+            if ticker in self.div_data:
+                common_idx = price_df.index.intersection(self.div_data[ticker].index)
+                div_df[ticker] = pd.Series(0.0, index=price_df.index)
+                div_df.loc[common_idx, ticker] = self.div_data[ticker].loc[common_idx]
+            else:
+                div_df[ticker] = pd.Series(0.0, index=price_df.index)
+        
+        # Fill missing values in real ticker data
         price_df = price_df.fillna(method='ffill').fillna(method='bfill')
-        
-        # Fill missing dividends with zeros
         div_df = div_df.fillna(0)
         
-        # Check if we have valid data for all tickers
-        for ticker in self.tickers:
+        # Check for valid data in real tickers
+        tickers_to_remove = []
+        for ticker in real_tickers:
             nan_pct = price_df[ticker].isna().mean() * 100
             if nan_pct > 0:
                 print(f"⚠️ {ticker}: {nan_pct:.1f}% missing data after alignment")
                 
                 if nan_pct > 50:
                     print(f"❌ {ticker}: Too much missing data, removing from analysis")
-                    price_df = price_df.drop(ticker, axis=1)
-                    div_df = div_df.drop(ticker, axis=1)
+                    tickers_to_remove.append(ticker)
         
-        # Remove tickers with invalid data
+        # Remove problematic real tickers
+        for ticker in tickers_to_remove:
+            if ticker in price_df.columns:
+                price_df = price_df.drop(ticker, axis=1)
+            if ticker in div_df.columns:
+                div_df = div_df.drop(ticker, axis=1)
+            
+        # Now add synthetic assets to the aligned data
+        for ticker in synthetic_tickers:
+            if ticker in self.price_data.columns:
+                # Create synthetic data using the aligned index
+                self._create_synthetic_asset(ticker, price_df.index)
+                
+                # Add the newly created synthetic data
+                price_df[ticker] = self.price_data[ticker]
+                div_df[ticker] = self.div_data[ticker]
+                
+                print(f"✅ {ticker}: Successfully added synthetic data to aligned dataset")
+        
+        # Update ticker list to reflect what we have data for
         valid_tickers = price_df.columns.tolist()
         if len(valid_tickers) < len(self.tickers):
             dropped = [t for t in self.tickers if t not in valid_tickers]
@@ -607,48 +686,9 @@ class PortfolioOptimizer:
         print(f"✅ Successfully aligned data for {len(self.tickers)} tickers, covering {len(price_df)} dates")
             
         return {
-            'prices': price_df[self.tickers],
-            'dividends': div_df[self.tickers]
+            'prices': price_df,
+            'dividends': div_df
         }
-
-    def _plot_returns_comparison(self, returns_summary: pd.DataFrame) -> None:
-        """Plot comparison of returns and volatility"""
-        try:
-            plt.figure(figsize=(12, 8))
-            
-            # Extract metrics
-            returns = returns_summary['AnnReturn']
-            vols = returns_summary['AnnVolatility']
-            sharpes = returns_summary['Sharpe']
-            
-            # Create scatter plot
-            plt.scatter(vols, returns, s=50, alpha=0.7)
-            
-            # Add labels for each point
-            for ticker, ret, vol in zip(returns.index, returns, vols):
-                plt.annotate(ticker, xy=(vol, ret), xytext=(5, 5), 
-                            textcoords='offset points', fontsize=9)
-            
-            # Add labels and title
-            plt.xlabel('Annualized Volatility (%)')
-            plt.ylabel('Annualized Return (%)')
-            plt.title('Risk-Return Profile of Assets')
-            plt.grid(True)
-            
-            # Add risk-free rate as horizontal line
-            plt.axhline(y=self.risk_free_rate*100, color='r', linestyle='--', 
-                       label=f'Risk-Free Rate ({self.risk_free_rate*100:.1f}%)')
-            
-            plt.legend()
-            
-            # Save plot
-            plot_file = os.path.join(self.output_dir, "risk_return_profile.png")
-            plt.savefig(plot_file)
-            plt.close()
-            print(f"Risk-return profile saved to {plot_file}")
-            
-        except Exception as e:
-            print(f"⚠️ Error creating returns comparison plot: {str(e)}")
 
     def portfolio_metrics(self, weights: np.ndarray) -> Tuple[float, float, float]:
         """Calculate portfolio return, volatility, and Sharpe ratio"""
@@ -878,6 +918,45 @@ class PortfolioOptimizer:
             
         except Exception as e:
             print(f"⚠️ Error creating efficient frontier plot: {str(e)}")
+
+    def _plot_returns_comparison(self, returns_summary):
+        """Plot comparison of returns and volatility"""
+        try:
+            plt.figure(figsize=(12, 8))
+            
+            # Extract metrics
+            returns = returns_summary['AnnReturn']
+            vols = returns_summary['AnnVolatility']
+            sharpes = returns_summary['Sharpe']
+            
+            # Create scatter plot
+            plt.scatter(vols, returns, s=50, alpha=0.7)
+            
+            # Add labels for each point
+            for ticker, ret, vol in zip(returns.index, returns, vols):
+                plt.annotate(ticker, xy=(vol, ret), xytext=(5, 5), 
+                            textcoords='offset points', fontsize=9)
+            
+            # Add labels and title
+            plt.xlabel('Annualized Volatility (%)')
+            plt.ylabel('Annualized Return (%)')
+            plt.title('Risk-Return Profile of Assets')
+            plt.grid(True)
+            
+            # Add risk-free rate as horizontal line
+            plt.axhline(y=self.risk_free_rate*100, color='r', linestyle='--', 
+                       label=f'Risk-Free Rate ({self.risk_free_rate*100:.1f}%)')
+            
+            plt.legend()
+            
+            # Save plot
+            plot_file = os.path.join(self.output_dir, "risk_return_profile.png")
+            plt.savefig(plot_file)
+            plt.close()
+            print(f"Risk-return profile saved to {plot_file}")
+            
+        except Exception as e:
+            print(f"⚠️ Error creating returns comparison plot: {str(e)}")
 
 def main():
     # Set up argument parser for command line options
