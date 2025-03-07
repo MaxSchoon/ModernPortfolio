@@ -102,11 +102,11 @@ except ImportError:
 
 # Try to import BatchFetcher, but define a simple version if it fails
 try:
-    from batch_fetcher import BatchFetcher
+    from data_fetcher import DataFetcher
 except ImportError:
     print("Warning: BatchFetcher module not found. Using simplified version.")
     
-    class BatchFetcher:
+    class DataFetcher:
         """Simplified batch fetcher that falls back to individual fetching"""
         def __init__(self, years=5, batch_size=3, delay_min=2.0, delay_max=5.0, retry_count=3):
             self.years = years
@@ -118,7 +118,7 @@ except ImportError:
 
 class PortfolioOptimizer:
     def __init__(self, tickers: List[str], risk_free_rate: float = 0.04, margin_cost_rate: float = 0.065, 
-                years: int = 5, output_dir: str = "portfolio_analysis"):
+                years: int = 5, output_dir: str = "portfolio_analysis", cache_dir: str = "data_cache"):
         self.tickers = tickers
         self.risk_free_rate = risk_free_rate
         self.margin_cost_rate = margin_cost_rate
@@ -127,13 +127,16 @@ class PortfolioOptimizer:
         self.div_data = None
         self.mean_returns = None
         self.cov_matrix = None
-        self.cache = CSVDataCache()  # Use CSV cache instead of old cache
+        self.cache = CSVDataCache(cache_dir)  # Pass the cache_dir
         self.output_dir = output_dir
+        self.charts_dir = os.path.join(output_dir, "price_charts")
+        self.cache_dir = cache_dir
         
-        # Create output directory if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            print(f"Created output directory: {output_dir}")
+        # Create output directories
+        for directory in [output_dir, self.charts_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+                print(f"Created directory: {directory}")
 
     def validate_data(self, ticker: str, prices: pd.Series, dividends: Optional[pd.Series] = None) -> bool:
         """Validate data quality for a given ticker"""
@@ -198,7 +201,7 @@ class PortfolioOptimizer:
             
             # Check for NaN values
             nan_count = prices.isna().sum()
-            if nan_count > 0:
+            if (nan_count > 0):
                 print(f"\n{ticker} - WARNING: Contains {nan_count} NaN values!")
                 # Try to get valid price range using non-NaN values
                 valid_prices = prices.dropna()
@@ -268,7 +271,7 @@ class PortfolioOptimizer:
             stock = yf.Ticker(test_ticker)
             data = stock.history(period="1d")
             
-            if data.empty:
+            if (data.empty):
                 print("❌ Error: Connected to Yahoo Finance but received empty data")
                 return False
                 
@@ -280,150 +283,71 @@ class PortfolioOptimizer:
             print(f"❌ Failed to connect to Yahoo Finance: {str(e)}")
             return False
 
-    def fetch_data(self, years: Optional[int] = None, use_cache: bool = True, use_batch_fetcher: bool = False) -> None:
+    def fetch_data(self, years: Optional[int] = None, use_cache: bool = True, 
+                   batch_size: int = 5, max_workers: int = 3) -> None:
         """
-        Fetch price and dividend data for the specified tickers
+        Fetch price and dividend data using DataFetcher
         
         Parameters:
             years: Number of years of data to fetch
             use_cache: Whether to use cached data
-            use_batch_fetcher: Whether to use batch fetcher (recommended for multiple tickers)
+            batch_size: Number of tickers to fetch in each batch
+            max_workers: Maximum number of concurrent workers
         """
         if years is None:
             years = self.years
             
-        # First test connectivity
-        if not self.test_yahoo_connectivity():
-            print("⚠️ Warning: Yahoo Finance connectivity test failed.")
-            print("Proceeding anyway, but expect potential issues with data fetching.")
-            
-        # Make sure end date is current date, not future date
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365*years)
+        print(f"\nFetching data for {len(self.tickers)} tickers over {years} years...")
         
-        print(f"\nFetching data from {start_date.date()} to {end_date.date()}")
+        # Initialize DataFetcher with appropriate settings
+        fetcher = DataFetcher(
+            cache_dir=self.cache_dir,
+            batch_size=batch_size,
+            years=years,
+            max_workers=max_workers
+        )
         
+        # Fetch data for all tickers
+        results = fetcher.fetch_all(self.tickers, use_cache)
+        
+        # Initialize price and div dataframes
         self.price_data = pd.DataFrame()
         self.div_data = pd.DataFrame()
-
-        print("\nFetching Data Status:")
-        print("-" * 50)
         
-        # Check cache status if using cache
-        if use_cache:
-            cache_status = self.cache.get_cache_status()
-            print("\nCache Status:")
-            print(f"- Price data: {cache_status.get('price_ticker_count', 0)} tickers ({cache_status.get('price_cache_size_mb', 0):.2f} MB)")
-            print(f"- Date range: {cache_status.get('oldest_data', 'N/A')} to {cache_status.get('newest_data', 'N/A')}")
-        else:
-            print("\nCache disabled. All data will be fetched from Yahoo Finance.")
+        # Process fetched data
+        price_data_dict = {}
+        div_data_dict = {}
         
-        # First skip synthetic assets and only get real ticker data
-        real_tickers = [t for t in self.tickers if t not in ['CASH', 'TBILLS']]
+        for ticker in self.tickers:
+            # Check if data fetching was successful
+            if ticker in results and results[ticker].startswith("✅"):
+                # Get data from cache (since DataFetcher will have saved it there)
+                cached_price = self.cache.get_price_data(ticker)
+                cached_div = self.cache.get_div_data(ticker)
+                
+                if cached_price is not None:
+                    price_data_dict[ticker] = cached_price
+                    
+                    # Plot price data
+                    self._plot_price_data(ticker, cached_price)
+                    
+                if cached_div is not None:
+                    div_data_dict[ticker] = cached_div
+            else:
+                print(f"❌ {ticker}: Failed to fetch data")
         
-        # Fetch real ticker data
-        for ticker in real_tickers:
-            # For real tickers, try to load from cache or fetch them
-            if use_cache:
-                cached_data = self.cache.get_price_data(ticker, max_age_days=30)
-                if cached_data is not None:
-                    if len(cached_data) > 100:  # Ensure we have enough data
-                        # Check for NaN values
-                        nan_pct = cached_data.isna().mean() * 100
-                        if nan_pct > 50:
-                            print(f"⚠️ {ticker}: Cached data has too many NaN values ({nan_pct:.1f}%), fetching fresh data")
-                        else:
-                            self.price_data[ticker] = cached_data
-                            div_data = self.cache.get_div_data(ticker, max_age_days=30)
-                            if div_data is not None:
-                                self.div_data[ticker] = div_data
-                            else:
-                                # Create empty dividend data
-                                self.div_data[ticker] = pd.Series(0.0, index=cached_data.index)
-                                
-                            print(f"✅ {ticker}: Using {len(cached_data)} days of cached data")
-                            
-                            # Plot price data
-                            self._plot_price_data(ticker, cached_data)
-                            continue
-            
-            # If we get here, need to fetch new data
-            formatted_ticker = format_ticker(ticker)
-            if formatted_ticker != ticker:
-                print(f"🔄 {ticker} formatted to {formatted_ticker}")
-                
-            try:
-                print(f"🔍 Fetching data for {formatted_ticker}...")
-                stock = yf.Ticker(formatted_ticker)
-                
-                # Fetch prices for date range
-                prices = stock.history(start=start_date, end=end_date)['Close']
-                
-                # Check data quality
-                if len(prices) < 100:
-                    print(f"❌ {ticker}: Insufficient data ({len(prices)} days)")
-                    continue
-                    
-                # Clean up NaN values if needed
-                nan_count = prices.isna().sum()
-                if (nan_count > 0):
-                    print(f"⚠️ {ticker}: Found {nan_count} NaN values, filling them")
-                    prices = prices.ffill().bfill()
-                    
-                # Format dates and save price data
-                prices.index = prices.index.tz_localize(None)
-                self.price_data[ticker] = prices
-                
-                # Get dividends
-                try:
-                    dividends = stock.dividends
-                    if not dividends.empty:
-                        dividends.index = dividends.index.tz_localize(None)
-                        div_series = pd.Series(0.0, index=prices.index)
-                        common_dates = dividends.index.intersection(div_series.index)
-                        
-                        if not common_dates.empty:
-                            div_series.loc[common_dates] = dividends[dividends.index.isin(common_dates)]
-                        
-                        self.div_data[ticker] = div_series
-                        print(f"   Found {len(dividends)} dividend payments")
-                    else:
-                        self.div_data[ticker] = pd.Series(0.0, index=prices.index)
-                        print(f"   No dividend data available")
-                except Exception as e:
-                    print(f"⚠️ Error fetching dividends for {ticker}: {str(e)}")
-                    self.div_data[ticker] = pd.Series(0.0, index=prices.index)
-                    
-                # Save to cache if enabled
-                if use_cache:
-                    self.cache.save_price_data(ticker, prices)
-                    self.cache.save_div_data(ticker, self.div_data[ticker])
-                    
-                print(f"✅ {ticker}: Successfully fetched {len(prices)} days of price data")
-                
-                # Plot price data for newly fetched ticker
-                if ticker in self.price_data:
-                    self._plot_price_data(ticker, self.price_data[ticker])
-                
-            except Exception as e:
-                print(f"❌ Error fetching {ticker}: {str(e)}")
-                continue
+        # Create DataFrame from collected series
+        if price_data_dict:
+            self.price_data = pd.concat(price_data_dict, axis=1)
+        if div_data_dict:
+            self.div_data = pd.concat(div_data_dict, axis=1)
         
-        # Once real data is fetched, create synthetic assets using the same date range
-        synthetic_tickers = [t for t in self.tickers if t in ['CASH', 'TBILLS']]
-        if synthetic_tickers and not self.price_data.empty:
-            # Get common date range from real data
-            common_index = self.price_data.index
-            
-            for ticker in synthetic_tickers:
-                self._create_synthetic_asset(ticker, common_index)
-                    
         # Remove tickers that failed to load
         failed_tickers = [ticker for ticker in self.tickers if ticker not in self.price_data.columns]
         if failed_tickers:
             print(f"\n❌ The following tickers failed to load: {', '.join(failed_tickers)}")
             self.tickers = [t for t in self.tickers if t in self.price_data.columns]
-                
+        
         print(f"\n✅ Successfully loaded data for {len(self.tickers)} tickers")
 
     def _create_synthetic_asset(self, ticker: str, common_index=None):
@@ -447,10 +371,10 @@ class PortfolioOptimizer:
         # Set return based on asset type
         if ticker == 'CASH':
             rate = self.risk_free_rate
-            variance = 1e-10  # Even smaller variance for cash
+            variance = 1e-10  # Very small variance for cash
         else:  # TBILLS
             rate = self.risk_free_rate * 1.02  # Slightly higher than cash
-            variance = 1e-8   # Very small but slightly more volatile than cash
+            variance = 1e-6   # More volatile than cash (increased from 1e-8)
         
         # Calculate daily return
         daily_return = (1 + rate) ** (1/252) - 1
@@ -491,8 +415,8 @@ class PortfolioOptimizer:
             plt.annotate(f"${end_price:.2f}", xy=(price_data.index[-1], end_price),
                         xytext=(-40, 10), textcoords="offset points")
             
-            # Save plot
-            plot_file = os.path.join(self.output_dir, f"{ticker}_price.png")
+            # Save plot to the charts directory instead of main output directory
+            plot_file = os.path.join(self.charts_dir, f"{ticker}_price.png")
             plt.savefig(plot_file)
             plt.close()
         except Exception as e:
@@ -557,8 +481,11 @@ class PortfolioOptimizer:
                 # Get the index for this ticker
                 idx = list(self.tickers).index(ticker)
                 
-                # Override covariance values
-                variance = 1e-8 if ticker == 'CASH' else 1e-6
+                # Override covariance values with more distinction between CASH and TBILLS
+                if ticker == 'CASH':
+                    variance = 1e-8  # Very low volatility for cash
+                else:  # TBILLS
+                    variance = 1e-5  # Higher volatility for T-bills (increased from 1e-6)
                 
                 # Set near-zero correlation with all other assets
                 for i in range(len(self.tickers)):
@@ -620,31 +547,40 @@ class PortfolioOptimizer:
         
         # Process real ticker data
         price_df = self.price_data[real_tickers].copy()
-        div_df = pd.DataFrame(index=price_df.index)
+        
+        # Create a dictionary to collect dividend series before creating DataFrame
+        # This avoids the fragmentation warning
+        div_series_dict = {}
         
         # Add dividend data for real tickers
         for ticker in real_tickers:
             if ticker in self.div_data:
                 common_idx = price_df.index.intersection(self.div_data[ticker].index)
-                div_df[ticker] = pd.Series(0.0, index=price_df.index)
-                div_df.loc[common_idx, ticker] = self.div_data[ticker].loc[common_idx]
+                div_series = pd.Series(0.0, index=price_df.index)
+                if not common_idx.empty:
+                    div_series.loc[common_idx] = self.div_data[ticker].loc[common_idx]
+                div_series_dict[ticker] = div_series
             else:
-                div_df[ticker] = pd.Series(0.0, index=price_df.index)
+                div_series_dict[ticker] = pd.Series(0.0, index=price_df.index)
         
-        # Fill missing values in real ticker data
-        price_df = price_df.fillna(method='ffill').fillna(method='bfill')
-        div_df = div_df.fillna(0)
+        # Create dividend DataFrame all at once (avoiding fragmentation)
+        div_df = pd.concat(div_series_dict, axis=1)
+        
+        # Fix the deprecated fillna method warning
+        price_df = price_df.ffill().bfill()
+        div_df = div_df.fillna(0)  # Simple fillna with value is still OK
         
         # Check for valid data in real tickers
         tickers_to_remove = []
         for ticker in real_tickers:
-            nan_pct = price_df[ticker].isna().mean() * 100
-            if nan_pct > 0:
-                print(f"⚠️ {ticker}: {nan_pct:.1f}% missing data after alignment")
-                
-                if nan_pct > 50:
-                    print(f"❌ {ticker}: Too much missing data, removing from analysis")
-                    tickers_to_remove.append(ticker)
+            if ticker in price_df.columns:
+                nan_pct = price_df[ticker].isna().mean() * 100
+                if nan_pct > 0:
+                    print(f"⚠️ {ticker}: {nan_pct:.1f}% missing data after alignment")
+                    
+                    if nan_pct > 50:
+                        print(f"❌ {ticker}: Too much missing data, removing from analysis")
+                        tickers_to_remove.append(ticker)
         
         # Remove problematic real tickers
         for ticker in tickers_to_remove:
@@ -654,16 +590,27 @@ class PortfolioOptimizer:
                 div_df = div_df.drop(ticker, axis=1)
             
         # Now add synthetic assets to the aligned data
+        synth_price_dict = {}
+        synth_div_dict = {}
+        
         for ticker in synthetic_tickers:
             if ticker in self.price_data.columns:
                 # Create synthetic data using the aligned index
                 self._create_synthetic_asset(ticker, price_df.index)
                 
-                # Add the newly created synthetic data
-                price_df[ticker] = self.price_data[ticker]
-                div_df[ticker] = self.div_data[ticker]
+                # Add the newly created synthetic data to dictionaries
+                synth_price_dict[ticker] = self.price_data[ticker]
+                synth_div_dict[ticker] = self.div_data[ticker]
                 
                 print(f"✅ {ticker}: Successfully added synthetic data to aligned dataset")
+        
+        # Add synthetic data to DataFrames
+        if synth_price_dict:
+            for ticker, series in synth_price_dict.items():  # FIX: Added parentheses to call .items()
+                price_df[ticker] = series
+        if synth_div_dict:
+            for ticker, series in synth_div_dict.items():  # FIX: Added parentheses to call .items()
+                div_df[ticker] = series
         
         # Update ticker list to reflect what we have data for
         valid_tickers = price_df.columns.tolist()
@@ -700,6 +647,51 @@ class PortfolioOptimizer:
         """
         print("\nOptimizing portfolio allocation...")
         
+        # Verify we have valid data to optimize
+        if self.mean_returns is None or self.cov_matrix is None:
+            print("❌ No return data available for optimization.")
+            return None
+        
+        # Check for problematic values in returns and covariance
+        if np.isnan(self.mean_returns).any():
+            nan_tickers = [t for t, val in zip(self.tickers, np.isnan(self.mean_returns)) if val]
+            print(f"❌ The following tickers have NaN returns: {', '.join(nan_tickers)}")
+            # Filter out problematic tickers
+            good_indices = ~np.isnan(self.mean_returns)
+            self.tickers = [t for i, t in enumerate(self.tickers) if good_indices[i]]
+            self.mean_returns = self.mean_returns[good_indices]
+            self.cov_matrix = self.cov_matrix.loc[self.tickers, self.tickers]
+            
+        if np.isnan(self.cov_matrix).any().any():
+            print("❌ The covariance matrix contains NaN values. Attempting to fix...")
+            # Try to identify specific problematic tickers
+            problem_rows = np.isnan(self.cov_matrix).any(axis=1)
+            nan_tickers = [t for i, t in enumerate(self.tickers) if problem_rows[i]]
+            print(f"Problematic tickers: {', '.join(nan_tickers)}")
+            
+            # Remove problematic tickers
+            good_tickers = [t for t in self.tickers if t not in nan_tickers]
+            if not good_tickers:
+                print("❌ No valid tickers left after removing problematic ones.")
+                return None
+                
+            print(f"Proceeding with {len(good_tickers)} valid tickers.")
+            self.tickers = good_tickers
+            self.mean_returns = self.mean_returns[self.tickers]
+            self.cov_matrix = self.cov_matrix.loc[self.tickers, self.tickers]
+        
+        # Check for infinite or extremely large values
+        if np.isinf(self.mean_returns).any() or np.max(np.abs(self.mean_returns)) > 100:
+            print("❌ Returns contain infinite or extreme values.")
+            print("Mean returns summary:")
+            for t, r in zip(self.tickers, self.mean_returns):
+                print(f"{t}: {r:.4f}")
+            return None
+            
+        if np.isinf(self.cov_matrix.values).any() or np.max(np.abs(self.cov_matrix.values)) > 100:
+            print("❌ Covariance matrix contains infinite or extreme values.")
+            return None
+        
         # Filter tickers if excluding cash
         if exclude_cash:
             opt_tickers = [t for t in self.tickers if t not in ['CASH', 'TBILLS']]
@@ -724,6 +716,7 @@ class PortfolioOptimizer:
         initial_weights = np.array([1/n_assets] * n_assets)
 
         def negative_sharpe(weights):
+            # Important: Use element-wise operations, not boolean operators
             ret = np.sum(opt_returns * weights)
             vol = np.sqrt(np.dot(weights.T, np.dot(opt_cov, weights)))
             vol = max(vol, 1e-8)  # Prevent division by zero
@@ -739,6 +732,13 @@ class PortfolioOptimizer:
                 return None
         except Exception as e:
             print(f"❌ Error during optimization: {str(e)}")
+            # Add more debugging information about the data
+            print("\nData diagnostics:")
+            print(f"Shape of returns vector: {opt_returns.shape}")
+            print(f"Shape of covariance matrix: {opt_cov.shape}")
+            print("First 5 returns:")
+            for i, ticker in enumerate(opt_tickers[:5]):
+                print(f"{ticker}: {opt_returns[i]:.4f}")
             return None
         
         # If we excluded cash, reincorporate cash assets with 0% allocation
@@ -966,12 +966,18 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Enable debug mode with more verbose output')
     parser.add_argument('--output-dir', type=str, default='portfolio_analysis', 
                         help='Directory for output files and visualizations')
+    parser.add_argument('--batch-size', type=int, default=5, 
+                        help='Batch size for data fetching')
+    parser.add_argument('--workers', type=int, default=3,
+                        help='Number of worker threads for data fetching')
+    parser.add_argument('--cache-dir', type=str, default='data_cache',
+                        help='Directory for cached data')
     
     args = parser.parse_args()
     
     # Clear cache if requested
     if args.clear_cache:
-        cache = CSVDataCache()
+        cache = CSVDataCache(args.cache_dir)
         cache.clear_cache()
         print("✅ Cache cleared successfully")
     
@@ -990,13 +996,16 @@ def main():
         risk_free_rate=args.risk_free,
         margin_cost_rate=args.margin_cost,
         years=args.years,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        cache_dir=args.cache_dir
     )
     
     print("🔄 Fetching data...")
     optimizer.fetch_data(
         years=args.years,
-        use_cache=not args.no_cache
+        use_cache=not args.no_cache,
+        batch_size=args.batch_size,
+        max_workers=args.workers
     )
     
     try:
@@ -1008,7 +1017,46 @@ def main():
         
         if not results:
             print("❌ Portfolio optimization failed.")
-            return
+            # Try to run with fewer tickers as a fallback
+            print("\n🔄 Attempting optimization with fewer tickers...")
+            
+            # Get the top 20 tickers by Sharpe ratio
+            if optimizer.mean_returns is not None and len(optimizer.tickers) > 20:
+                sharpes = (optimizer.mean_returns - optimizer.risk_free_rate) / \
+                          np.sqrt(np.diag(optimizer.cov_matrix))
+                
+                # Sort tickers by Sharpe ratio
+                sorted_indices = np.argsort(-sharpes)  # Descending order
+                best_tickers = [optimizer.tickers[i] for i in sorted_indices[:20]]
+                
+                print(f"Selected top 20 tickers by Sharpe ratio: {', '.join(best_tickers)}")
+                
+                # Create a new optimizer with fewer tickers
+                fallback_optimizer = PortfolioOptimizer(
+                    best_tickers, 
+                    risk_free_rate=args.risk_free,
+                    margin_cost_rate=args.margin_cost,
+                    years=args.years,
+                    output_dir=args.output_dir + "_fallback"
+                )
+                
+                # Copy data from original optimizer to avoid re-fetching
+                for ticker in best_tickers:
+                    if ticker in optimizer.price_data and ticker in optimizer.div_data:
+                        fallback_optimizer.price_data[ticker] = optimizer.price_data[ticker]
+                        fallback_optimizer.div_data[ticker] = optimizer.div_data[ticker]
+                
+                # Calculate returns and run optimization
+                fallback_optimizer.calculate_returns()
+                results = fallback_optimizer.optimize_portfolio(exclude_cash=args.exclude_cash)
+                
+                if not results:
+                    print("❌ Fallback optimization also failed.")
+                    return
+                else:
+                    print("✅ Fallback optimization succeeded!")
+            else:
+                return
         
         # Print results
         print("\nOptimal Portfolio Allocation:")
@@ -1037,10 +1085,24 @@ def main():
         if args.debug:
             import traceback
             traceback.print_exc()
+            
+        # Additional diagnostic information
+        print("\nDiagnostic information:")
+        if optimizer.price_data is not None:
+            print(f"- Number of tickers with price data: {len(optimizer.price_data.columns)}")
+            print(f"- First 5 tickers: {', '.join(optimizer.price_data.columns[:5])}")
+            print(f"- Date range: {optimizer.price_data.index[0]} to {optimizer.price_data.index[-1]}")
+            print(f"- Missing values summary:")
+            for col in optimizer.price_data.columns[:10]:  # Show first 10 tickers
+                missing = optimizer.price_data[col].isna().sum()
+                if missing > 0:
+                    print(f"  {col}: {missing} missing values ({missing/len(optimizer.price_data)*100:.1f}%)")
         
     print(f"\n✅ Analysis complete. Results saved to {args.output_dir}")
 
 if __name__ == "__main__":
     main()
+
+
 
 

@@ -1,0 +1,75 @@
+ticker;description;status
+GOOGL;Alphabet Inc;Success
+BRK-B;Berkshire Hathaway Inc;Success
+ASML.AS;ASML Holding NV;Success
+BESI.AS;BE Semiconductor Industries NV;Success
+ASM.AS;ASM International NV;Success
+HUT;Hut 8 Mining Corp;Success
+DAC;Danaos Corporation;Success
+AMR;Alpha Metallurgical Resources Inc;Success
+FLOW.AS;Flow Traders NV;Success
+HAL.AS;HAL Trust ;Success
+NVDA;NVIDIA Corporation;Success
+EXO.AS;EXOR N.V.;Success
+PLTR;Palantir Technologies Inc;Success
+BTC;Bitcoin;Success
+ETH;Ethereum;Success
+SOL;Solana;Success
+MC.PA;LVMH Moet Hennessy Louis Vuitton SE;Success
+TNDM; Tandem Diabetes Care Inc;Success
+AAPL;Apple Inc;Success
+TSLA;Tesla Inc;Success
+MSFT;Microsoft Corporation;Success
+AMZN;Amazon.com Inc;Success
+META;Meta Platforms Inc;Success
+JPM;JPMorgan Chase & Co.;Success
+JNJ;Johnson & Johnson;Success
+V;Visa Inc.;Success
+PG;Procter & Gamble Co.;Success
+UNH;UnitedHealth Group Inc.;Success
+HD;Home Depot Inc.;Success
+MA;Mastercard Inc.;Success
+BAC;Bank of America Corp.;Success
+XOM;Exxon Mobil Corp.;Success
+CVX;Chevron Corp.;Success
+LLY;Eli Lilly and Co.;Success
+MRK;Merck & Co. Inc.;Success
+AVGO;Broadcom Inc.;Success
+COST;Costco Wholesale Corp.;Success
+CRM;Salesforce Inc.;Success
+ABBV;AbbVie Inc.;Success
+WMT;Walmart Inc.;Success
+KO;Coca-Cola Co.;Success
+PEP;PepsiCo Inc.;Success
+ACN;Accenture plc;Success
+SAP.DE;SAP SE;Success
+SIE.DE;Siemens AG;Success
+RMS.PA;Hermès International SA;Success
+LIN.DE;Linde plc;Success
+AI.PA;Air Liquide SA;Success
+DGE.L;Diageo plc;Success
+NOVO-B.CO;Novo Nordisk A/S;Success
+ASML;ASML Holding NV;Success
+ADYEN.AS;Adyen N.V.;Success
+BMW.DE;Bayerische Motoren Werke AG;Success
+SAN.MC;Banco Santander SA;Success
+TEF.MC;Telefónica SA;Success
+OR.PA;L'Oreal SA;Success
+BNP.PA;BNP Paribas SA;Success
+CS.PA;AXA SA;Success
+ABI.BR;Anheuser-Busch InBev SA/NV;Success
+PHIA.AS;Koninklijke Philips NV;Success
+UNA.AS;Unilever PLC;Success
+SU.PA;Schneider Electric SE;Success
+BABA;Alibaba Group Holding Ltd;Success
+TCEHY;Tencent Holdings Ltd;Success
+JD;JD.com Inc;Success
+BIDU;Baidu Inc;Success
+NTES;NetEase Inc;Success
+XPEV;XPeng Inc;Success
+LI;Li Auto Inc;Success
+NIO;NIO Inc;Success
+PDD;Pinduoduo Inc;Success
+TAL;TAL Education Group;Success
+CASH;Cash equivalent;Success
+TBILLS;Treasury Bills;Success

@@ -18,7 +18,7 @@ class CSVDataCache:
     A cache manager for financial data stored in CSV files
     """
     
-    def __init__(self, cache_dir: str = "csv_data_cache"):
+    def __init__(self, cache_dir: str = "data_cache"):
         """
         Initialize the cache with the specified directory
         
@@ -29,9 +29,10 @@ class CSVDataCache:
         self.price_dir = os.path.join(cache_dir, "prices")
         self.div_dir = os.path.join(cache_dir, "dividends")
         self.meta_dir = os.path.join(cache_dir, "metadata")
+        self.info_dir = os.path.join(cache_dir, "info")
         
         # Create directories if they don't exist
-        for directory in [self.cache_dir, self.price_dir, self.div_dir, self.meta_dir]:
+        for directory in [self.cache_dir, self.price_dir, self.div_dir, self.meta_dir, self.info_dir]:
             if not os.path.exists(directory):
                 os.makedirs(directory)
                 
@@ -165,6 +166,43 @@ class CSVDataCache:
             return True
         except Exception as e:
             print(f"Error saving dividend data for {ticker}: {str(e)}")
+            return False
+    
+    def save_info_data(self, ticker: str, info_data: Dict[str, Any]) -> bool:
+        """
+        Save ticker info data to cache
+        
+        Parameters:
+            ticker: Ticker symbol
+            info_data: Dictionary containing ticker info
+            
+        Returns:
+            Success status
+        """
+        try:
+            info_file = os.path.join(self.info_dir, f"{ticker}_info.json")
+            
+            # Filter out any non-serializable objects
+            filtered_info = {}
+            for key, value in info_data.items():
+                try:
+                    # Test JSON serialization
+                    json.dumps({key: value})
+                    filtered_info[key] = value
+                except (TypeError, OverflowError):
+                    # Skip non-serializable values
+                    pass
+            
+            # Save to file
+            with open(info_file, 'w') as f:
+                json.dump(filtered_info, f, indent=2)
+            
+            # Update metadata
+            self._update_metadata(ticker, 'info', len(filtered_info))
+            
+            return True
+        except Exception as e:
+            print(f"Error saving info data for {ticker}: {str(e)}")
             return False
     
     def _get_synthetic_asset_data(self, ticker: str, years: int = 5) -> pd.Series:

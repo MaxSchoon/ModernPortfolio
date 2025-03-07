@@ -6,7 +6,8 @@ This module contains common helper functions used across different scripts.
 
 import os
 import pandas as pd
-from typing import Any, List, Dict, Optional
+import re
+from typing import Any, List, Dict, Optional, Tuple
 
 def load_tickers(csv_path: str) -> List[str]:
     """
@@ -172,6 +173,59 @@ def is_valid_ticker_format(ticker: str) -> bool:
     # US stocks don't need suffix
     return True
 
+def validate_ticker(ticker: str, verbose: bool = True) -> Tuple[bool, str, str]:
+    """
+    Validate a ticker symbol and provide correction if needed
+    
+    Parameters:
+        ticker: Ticker symbol to validate
+        verbose: Whether to print validation details
+        
+    Returns:
+        Tuple of (is_valid, corrected_ticker, message)
+    """
+    if ticker is None or not isinstance(ticker, str):
+        return False, ticker, "Invalid ticker type"
+        
+    # Normalize by removing whitespace and converting to uppercase
+    corrected = ticker.strip().upper()
+    
+    # Handle special assets
+    if corrected in ['CASH', 'TBILLS']:
+        return True, corrected, "Special asset"
+    
+    # Handle empty tickers
+    if not corrected:
+        return False, ticker, "Empty ticker"
+    
+    # Handle special cases
+    if corrected.lower() == 'danaos':
+        corrected = 'DAC'
+    elif corrected.lower() == 'flow':
+        corrected = 'FLOW.AS'
+    elif corrected.lower() == 'hal':
+        corrected = 'HAL.AS'
+        
+    # Check if the ticker contains invalid characters
+    if not re.match(r'^[\w\.-]+$', corrected):
+        return False, ticker, "Invalid characters in ticker"
+        
+    # For international exchanges, ensure correct suffix format
+    if '.' in corrected:
+        suffix = corrected.split('.')[-1]
+        valid_suffixes = ['AS', 'L', 'PA', 'DE', 'MI', 'MC', 'SW', 'ST', 
+                          'OL', 'CO', 'BR', 'VI', 'LS', 'AT', 'AX', 'TO', 
+                          'T', 'HK']
+        if suffix not in valid_suffixes:
+            if verbose:
+                print(f"Warning: '{ticker}' has unknown exchange suffix '{suffix}'")
+    
+    if verbose:
+        if ticker != corrected:
+            print(f"Corrected '{ticker}' to '{corrected}'")
+    
+    return True, corrected, "Valid ticker"
+
 def validate_dataframe(df: pd.DataFrame, name: str) -> Dict[str, Any]:
     """Validate a dataframe for portfolio optimization calculations"""
     report = {
@@ -288,3 +342,113 @@ def log_progress(message: str, title: bool = False, error: bool = False) -> None
         print(f"❌ {message}")
     else:
         print(f"- {message}")
+
+###############################################################################
+# Helper Functions for Display
+###############################################################################
+
+def print_info(message: str) -> None:
+    """Print an informational message"""
+    try:
+        from colorama import Fore, Style
+        print(f"{Fore.BLUE}{message}{Style.RESET_ALL}")
+    except ImportError:
+        print(f"INFO: {message}")
+
+def print_success(message: str) -> None:
+    """Print a success message"""
+    try:
+        from colorama import Fore, Style
+        print(f"{Fore.GREEN}✅ {message}{Style.RESET_ALL}")
+    except ImportError:
+        print(f"SUCCESS: {message}")
+
+def print_warning(message: str) -> None:
+    """Print a warning message"""
+    try:
+        from colorama import Fore, Style
+        print(f"{Fore.YELLOW}⚠️ {message}{Style.RESET_ALL}")
+    except ImportError:
+        print(f"WARNING: {message}")
+        
+def print_error(message: str) -> None:
+    """Print an error message"""
+    try:
+        from colorama import Fore, Style
+        print(f"{Fore.RED}❌ {message}{Style.RESET_ALL}")
+    except ImportError:
+        print(f"ERROR: {message}")
+
+def validate_prices_df(df: pd.DataFrame, ticker: str = None) -> Dict[str, Any]:
+    """
+    Validate a dataframe of price data
+    
+    Parameters:
+        df: DataFrame with price data
+        ticker: Optional ticker symbol for reporting
+        
+    Returns:
+        Dictionary with validation results
+    """
+    result = {
+        'valid': True,
+        'errors': [],
+        'warnings': [],
+        'info': []
+    }
+    
+    # Check if dataframe is empty
+    if df is None or df.empty:
+        result['valid'] = False
+        result['errors'].append(f"No data available for {ticker if ticker else 'unknown ticker'}")
+        return result
+        
+    # Check index type
+    if not isinstance(df.index, pd.DatetimeIndex):
+        result['valid'] = False
+        result['errors'].append(f"Index is not DatetimeIndex (got {type(df.index).__name__})")
+        
+    # Check for sufficient data points
+    if len(df) < 100:
+        result['valid'] = False
+        result['errors'].append(f"Insufficient data points: {len(df)} (minimum 100)")
+    
+    # Find the price column
+    price_col = None
+    if 'Close' in df.columns:
+        price_col = 'Close'
+    elif 'price' in df.columns:
+        price_col = 'price'
+    elif len(df.columns) > 0:
+        price_col = df.columns[0]
+        result['warnings'].append(f"Using column '{price_col}' as price data")
+    else:
+        result['valid'] = False
+        result['errors'].append("No columns found in dataframe")
+        return result
+    
+    # Check for NaN values
+    nan_count = df[price_col].isna().sum()
+    nan_pct = (nan_count / len(df)) * 100
+    
+    if nan_count > 0:
+        if nan_pct > 20:
+            result['valid'] = False
+            result['errors'].append(f"Too many NaN values: {nan_count} ({nan_pct:.1f}%)")
+        else:
+            result['warnings'].append(f"Contains {nan_count} NaN values ({nan_pct:.1f}%)")
+    
+    # Check data range
+    if not df.index.empty:
+        start_date = df.index[0]
+        end_date = df.index[-1]
+        date_range = (end_date - start_date).days
+        
+        result['info'].append(f"Date range: {start_date.date()} to {end_date.date()} ({date_range} days)")
+        
+        # Check freshness
+        days_old = (pd.Timestamp.now() - end_date).days
+        if days_old > 30:
+            result['warnings'].append(f"Data is {days_old} days old")
+    
+    return result
