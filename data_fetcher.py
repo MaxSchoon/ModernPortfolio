@@ -111,26 +111,45 @@ class DataFetcher:
         self.api_call_times.append(time.time())
     
     def _animated_sleep(self, seconds: float, message: str = "Waiting"):
-        """Display an animated spinner while sleeping"""
+        """Display an animated spinner while sleeping on a single line"""
         spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
         end_time = time.time() + seconds
-        
-        # Print initial message
-        print(f"\n{Fore.YELLOW}{message}: ", end="", flush=True)
+        start_time = time.time()
+        total_seconds = seconds
         
         try:
             while time.time() < end_time:
+                elapsed = time.time() - start_time
                 remaining = max(0, end_time - time.time())
-                sys.stdout.write(f"{next(spinner)} {remaining:.1f}s remaining   \r")
+                progress = min(1.0, elapsed / total_seconds)
+                
+                # Create a progress bar
+                bar_length = 20
+                block = int(round(bar_length * progress))
+                progress_bar = f"[{Fore.GREEN}{'█' * block}{Fore.YELLOW}{'-' * (bar_length - block)}{Style.RESET_ALL}]"
+                
+                # Format the status line
+                percentage = int(progress * 100)
+                status = f"{Fore.CYAN}{message}{Style.RESET_ALL} {progress_bar} {percentage}% {Fore.BLUE}{next(spinner)}{Style.RESET_ALL} {remaining:.1f}s remaining"
+                
+                # Clear the line and write the new status
+                sys.stdout.write("\r" + " " * 100 + "\r")  # Clear the line
+                sys.stdout.write(status)
                 sys.stdout.flush()
                 time.sleep(0.1)
-                
-            # Print completion
-            sys.stdout.write(f"✓ Completed {seconds:.1f}s wait{' ' * 20}\n")
+            
+            # Show completion status
+            progress_bar = f"[{Fore.GREEN}{'█' * bar_length}{Style.RESET_ALL}]"
+            completion = f"\r{Fore.CYAN}{message}{Style.RESET_ALL} {progress_bar} {Fore.GREEN}100% ✓ Complete{Style.RESET_ALL}{' ' * 20}"
+            sys.stdout.write(completion)
             sys.stdout.flush()
-            print(Style.RESET_ALL, end="")
+            print()  # Move to the next line after completion
+            
         except KeyboardInterrupt:
-            print(f"\n{Fore.RED}Wait interrupted!{Style.RESET_ALL}")
+            sys.stdout.write("\r" + " " * 100 + "\r")  # Clear the line
+            sys.stdout.write(f"{Fore.RED}Wait interrupted!{Style.RESET_ALL}")
+            sys.stdout.flush()
+            print()
             raise
     
     def fetch_ticker(self, ticker: str, use_cache: bool = True) -> Tuple[bool, str]:

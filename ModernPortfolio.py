@@ -1,3 +1,4 @@
+from unittest import result
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -8,6 +9,7 @@ import os
 import argparse
 import json
 import matplotlib.pyplot as plt
+import time  # Add time for performance tracking
 
 # Import the CSV cache manager and cache standardizer
 from csv_cache_manager import CSVDataCache
@@ -44,7 +46,8 @@ except ImportError:
                     delimiter = ';'  # Default
                     print("Using default semicolon delimiter")
             
-            df = pd.read_csv(csv_path, sep=delimiter)
+            # Skip header comment lines
+            df = pd.read_csv(csv_path, sep=delimiter, comment='/')
             
             # Check column names (case insensitive)
             ticker_column = None
@@ -124,7 +127,8 @@ except ImportError:
 
 class PortfolioOptimizer:
     def __init__(self, tickers: List[str], risk_free_rate: float = 0.04, margin_cost_rate: float = 0.065, 
-                years: int = 5, output_dir: str = "portfolio_analysis", cache_dir: str = "data_cache"):
+                years: int = 5, output_dir: str = "portfolio_analysis", cache_dir: str = "data_cache",
+                debug: bool = False):
         self.tickers = tickers
         self.risk_free_rate = risk_free_rate
         self.margin_cost_rate = margin_cost_rate
@@ -137,12 +141,16 @@ class PortfolioOptimizer:
         self.output_dir = output_dir
         self.charts_dir = os.path.join(output_dir, "price_charts")
         self.cache_dir = cache_dir
+        self.debug = debug
         
         # Create output directories
         for directory in [output_dir, self.charts_dir]:
             if not os.path.exists(directory):
                 os.makedirs(directory)
                 print(f"Created directory: {directory}")
+        
+        # Add performance tracking
+        self.performance_stats = {}
 
     def validate_data(self, ticker: str, prices: pd.Series, dividends: Optional[pd.Series] = None) -> bool:
         """Validate data quality for a given ticker"""
@@ -511,6 +519,9 @@ class PortfolioOptimizer:
         returns_summary['AnnVolatility'] = np.sqrt(np.diag(self.cov_matrix)) * 100
         returns_summary['Sharpe'] = (self.mean_returns - self.risk_free_rate) / np.sqrt(np.diag(self.cov_matrix))
         
+        # Store the returns summary for later use
+        self.returns_summary = returns_summary
+        
         # Save returns summary
         summary_file = os.path.join(self.output_dir, "returns_summary.csv")
         returns_summary.to_csv(summary_file)
@@ -526,12 +537,15 @@ class PortfolioOptimizer:
         # Plot returns comparison
         self._plot_returns_comparison(returns_summary)
         
-        for ticker in self.tickers:
-            print(f"{ticker}: Return = {self.mean_returns[ticker]*100:.2f}%, " +
-                 f"Volatility = {np.sqrt(self.cov_matrix.loc[ticker, ticker])*100:.2f}%")
+        # Only print individual ticker returns in debug mode
+        if self.debug:
+            for ticker in self.tickers:
+                print(f"{ticker}: Return = {self.mean_returns[ticker]*100:.2f}%, " +
+                     f"Volatility = {np.sqrt(self.cov_matrix.loc[ticker, ticker])*100:.2f}%")
 
     def _align_data(self):
         """Align price and dividend data to ensure all tickers have data for the same dates"""
+        start_time = time.time()
         print("Aligning data across tickers...")
         
         # First identify synthetic assets
@@ -551,187 +565,137 @@ class PortfolioOptimizer:
                 'dividends': div_df
             }
         
-        # Process real ticker data
+        # Process real ticker data - use vectorized operations where possible
         price_df = self.price_data[real_tickers].copy()
         
         # CRITICAL FIX: Handle future dates issue
         current_date = pd.Timestamp.now().normalize()  # Normalize to remove time component
         
         print(f"Full date range before filtering: {price_df.index.min()} to {price_df.index.max()}")
-        print(f"Current date: {current_date}")
         
-        # Filter out future dates
-        future_mask = price_df.index > current_date
-        if future_mask.any():
-            future_dates_count = future_mask.sum()
-            print(f"⚠️ Found {future_dates_count} future dates in the data! Removing them.")
-            price_df = price_df.loc[~future_mask]
-            
-        print(f"Date range after filtering future dates: {price_df.index.min()} to {price_df.index.max()}")
+        # Filter out future dates - vectorized operation
+        if price_df.index.max() > current_date:
+            price_df = price_df.loc[price_df.index <= current_date]
+            print(f"Date range after filtering future dates: {price_df.index.min()} to {price_df.index.max()}")
         
-        # Create missing data report for all tickers BEFORE doing any filtering
-        print("\nMissing data report BEFORE filtering:")
-        all_missing_pcts = {}
-        for ticker in real_tickers:
-            if ticker in price_df.columns:
-                missing_count = price_df[ticker].isna().sum()
-                missing_pct = (missing_count / len(price_df)) * 100
-                all_missing_pcts[ticker] = missing_pct
-                print(f"{ticker}: {missing_count} missing values ({missing_pct:.1f}%)")
+        # Ensure date format is consistent
+        price_df.index = pd.to_datetime(price_df.index, format='%Y-%m-%d')
         
-        # Check if ALL tickers have high missing data - this indicates a systematic issue
-        high_missing_threshold = 40.0  # Consider this the normal threshold
-        all_high_missing = all(pct > high_missing_threshold for pct in all_missing_pcts.values())
+        # Calculate missing data percentages vectorized
+        missing_pcts = price_df.isna().mean() * 100
+        
+        # Only print detailed missing data report in debug mode
+        if self.debug:
+            print("\nMissing data report BEFORE filtering:")
+            for ticker, pct in missing_pcts.items():
+                print(f"{ticker}: {price_df[ticker].isna().sum()} missing values ({pct:.1f}%)")
+        else:
+            print("\nAnalyzing data quality (use --debug for details)...")
+            print(f"Average missing data: {missing_pcts.mean():.1f}%")
+        
+        # Check if ALL tickers have high missing data
+        high_missing_threshold = 45.0
+        all_high_missing = (missing_pcts > high_missing_threshold).all()
         
         if all_high_missing:
             print("\n⚠️ All tickers have high missing data percentages. This suggests a systematic issue.")
             
-            # Determine if we can salvage data by choosing a specific date range with good coverage
-            # First, find first and last valid values for each ticker
-            first_valid = {}
-            last_valid = {}
-            
-            for ticker in real_tickers:
-                if ticker in price_df.columns:
-                    valid_mask = ~price_df[ticker].isna()
-                    valid_dates = price_df.index[valid_mask]
-                    if len(valid_dates) > 0:
-                        first_valid[ticker] = valid_dates.min()
-                        last_valid[ticker] = valid_dates.max()
-            
-            if first_valid and last_valid:
-                # Find the most recent common date range
-                latest_start = max(first_valid.values())
-                earliest_end = min(last_valid.values())
+            # Find common valid date range more efficiently
+            valid_data = ~price_df.isna()
+            if valid_data.any().any():
+                # For each ticker, get first and last valid index
+                first_valid = pd.Series({col: valid_data[col][valid_data[col]].index.min() 
+                                        for col in valid_data.columns if valid_data[col].any()})
+                last_valid = pd.Series({col: valid_data[col][valid_data[col]].index.max() 
+                                      for col in valid_data.columns if valid_data[col].any()})
                 
-                if latest_start <= earliest_end:
-                    print(f"\n🔄 Attempting to salvage data by using common date range:")
-                    print(f"   {latest_start.date()} to {earliest_end.date()}")
+                if not first_valid.empty and not last_valid.empty:
+                    latest_start = first_valid.max()
+                    earliest_end = last_valid.min()
                     
-                    # Filter to this date range
-                    price_df = price_df.loc[latest_start:earliest_end]
-                    
-                    # Check quality of this subset
-                    print("\nMissing data after date range restriction:")
-                    for ticker in real_tickers:
-                        if ticker in price_df.columns:
-                            missing_count = price_df[ticker].isna().sum()
-                            missing_pct = (missing_count / len(price_df)) * 100
-                            all_missing_pcts[ticker] = missing_pct
-                            print(f"{ticker}: {missing_count} missing values ({missing_pct:.1f}%)")
-                else:
-                    print(f"\n❌ No common valid date range found across tickers.")
+                    if latest_start <= earliest_end:
+                        print(f"\n🔄 Attempting to salvage data by using common date range:")
+                        print(f"   {latest_start.date()} to {earliest_end.date()}")
+                        
+                        # Filter to this date range
+                        price_df = price_df.loc[latest_start:earliest_end]
+                        
+                        # Check quality of this subset
+                        missing_pcts = price_df.isna().mean() * 100
+                        print("\nMissing data after date range restriction:")
+                        for ticker, pct in missing_pcts.items():
+                            print(f"{ticker}: {price_df[ticker].isna().sum()} missing values ({pct:.1f}%)")
         
-        # If we still have a systematic issue, use a more relaxed approach
-        all_high_missing = all(pct > high_missing_threshold for pct in all_missing_pcts.values())
+        # If we still have a systematic issue, use more efficient ticker selection
+        all_high_missing = (missing_pcts > high_missing_threshold).all()
         if all_high_missing:
-            # Try different approach - sort by missing percentage and take top N with least missing data
-            print("\n🔄 Using relaxed filtering - selecting tickers with least missing data")
-            sorted_tickers = sorted(all_missing_pcts.items(), key=lambda x: x[1])
-            
-            # Take top 10 or 20% of tickers, whichever is more
+            # Sort tickers by missing percentage and take top N
+            sorted_tickers = missing_pcts.sort_values().index.tolist()
             keep_count = max(10, int(len(sorted_tickers) * 0.2))
-            keep_count = min(keep_count, len(sorted_tickers))  # Don't try to keep more than we have
+            keep_count = min(keep_count, len(sorted_tickers))
             
-            keep_tickers = [t[0] for t in sorted_tickers[:keep_count]]
+            keep_tickers = sorted_tickers[:keep_count]
             print(f"Keeping top {keep_count} tickers with least missing data:")
-            for ticker, pct in sorted_tickers[:keep_count]:
-                print(f"- {ticker}: {pct:.1f}% missing")
+            for ticker in keep_tickers:
+                print(f"- {ticker}: {missing_pcts[ticker]:.1f}% missing")
             
             # Adjust the dataframe to only include these tickers
             price_df = price_df[keep_tickers]
             real_tickers = keep_tickers
         else:
-            # Use original filtering
-            print(f"\nChecking data quality before alignment...")
-            valid_tickers = []
-            for ticker in real_tickers:
-                if ticker in price_df.columns:
-                    nan_pct = price_df[ticker].isna().mean() * 100
-                    if nan_pct > 40:  # Threshold
-                        print(f"⚠️ Removing {ticker}: {nan_pct:.1f}% missing data")
-                    else:
-                        valid_tickers.append(ticker)
+            # More efficient filtering
+            valid_mask = missing_pcts <= 45
+            valid_tickers = missing_pcts[valid_mask].index.tolist()
             
-            # If we've filtered out tickers, update the dataframe
             if len(valid_tickers) < len(real_tickers):
                 print(f"Proceeding with {len(valid_tickers)} out of {len(real_tickers)} real tickers after quality check")
-                if valid_tickers:  # Only update if we have valid tickers
+                if valid_tickers:
                     price_df = price_df[valid_tickers]
                     real_tickers = valid_tickers
         
-        # CRITICAL FIX: Check if we have enough data after filtering
         if len(real_tickers) == 0:
             print("❌ No valid real tickers with sufficient data.")
             return None
         
-        # Create a dictionary to collect dividend series before creating DataFrame
-        div_series_dict = {}
+        # Create dividends DataFrame more efficiently
+        # Pre-create a DataFrame with zeros and then fill it
+        div_df = pd.DataFrame(0.0, index=price_df.index, columns=real_tickers)
         
-        # Add dividend data for real tickers
+        # Update with actual dividend data where available
         for ticker in real_tickers:
             if ticker in self.div_data:
                 common_idx = price_df.index.intersection(self.div_data[ticker].index)
-                div_series = pd.Series(0.0, index=price_df.index)
                 if not common_idx.empty:
-                    div_series.loc[common_idx] = self.div_data[ticker].loc[common_idx]
-                div_series_dict[ticker] = div_series
-            else:
-                div_series_dict[ticker] = pd.Series(0.0, index=price_df.index)
+                    div_df.loc[common_idx, ticker] = self.div_data[ticker].loc[common_idx]
         
-        # Create dividend DataFrame all at once (avoiding fragmentation)
-        div_df = pd.concat(div_series_dict, axis=1)
-        
-        # Final cleanup - ensure complete data without NaN values
+        # Apply forward and backward fill in one step
         price_df = price_df.ffill().bfill()
-        div_df = div_df.fillna(0)
         
-        # Now add synthetic assets to the aligned data
-        synth_price_dict = {}
-        synth_div_dict = {}
-        
+        # Add synthetic assets efficiently
         for ticker in synthetic_tickers:
             if ticker in self.price_data.columns:
-                # Create synthetic data using the aligned index
                 self._create_synthetic_asset(ticker, price_df.index)
-                
-                # Add the newly created synthetic data to dictionaries
-                synth_price_dict[ticker] = self.price_data[ticker]
-                synth_div_dict[ticker] = self.div_data[ticker]
-                
+                price_df[ticker] = self.price_data[ticker]
+                div_df[ticker] = self.div_data[ticker]
                 print(f"✅ {ticker}: Successfully added synthetic data to aligned dataset")
         
-        # Add synthetic data to DataFrames
-        if synth_price_dict:
-            for ticker, series in synth_price_dict.items():
-                price_df[ticker] = series
-        if synth_div_dict:
-            for ticker, series in synth_div_dict.items():
-                div_df[ticker] = series
-        
-        # Update ticker list to reflect what we have data for
-        valid_tickers = price_df.columns.tolist()
-        if len(valid_tickers) < len(self.tickers):
-            dropped = [t for t in self.tickers if t not in valid_tickers]
-            print(f"❌ Removed {len(dropped)} tickers with insufficient data: {', '.join(dropped)}")
-            self.tickers = valid_tickers
+        # Update ticker list 
+        self.tickers = price_df.columns.tolist()
             
-        if not self.tickers:
-            print("❌ No valid tickers left after alignment")
-            return None
-            
-        # Print data quality summary after alignment
+        # Print data quality summary
         nan_counts = price_df.isna().sum()
         if nan_counts.sum() > 0:
             print(f"⚠️ WARNING: Still have {nan_counts.sum()} NaN values after alignment!")
-            for ticker in price_df.columns:
-                if nan_counts[ticker] > 0:
-                    print(f"  {ticker}: {nan_counts[ticker]} NaN values ({nan_counts[ticker]/len(price_df)*100:.1f}%)")
+            for ticker, count in nan_counts[nan_counts > 0].items():
+                print(f"  {ticker}: {count} NaN values ({count/len(price_df)*100:.1f}%)")
         else:
             print(f"✅ No NaN values in aligned data - good for optimization")
             
         print(f"✅ Successfully aligned data for {len(self.tickers)} tickers, covering {len(price_df)} dates")
         print(f"   Date range: {price_df.index[0].date()} to {price_df.index[-1].date()}")
+        
+        # Track performance
+        self.performance_stats['align_data_time'] = time.time() - start_time
             
         return {
             'prices': price_df,
@@ -746,13 +710,15 @@ class PortfolioOptimizer:
         sharpe = (ret - self.risk_free_rate) / vol
         return ret, vol, sharpe
 
-    def optimize_portfolio(self, exclude_cash: bool = False) -> Dict:
+    def optimize_portfolio(self, exclude_cash: bool = False, skip_plots: bool = False) -> Dict:
         """
         Optimize portfolio weights for maximum Sharpe ratio
         
         Parameters:
             exclude_cash: If True, exclude CASH and TBILLS from optimization
+            skip_plots: If True, skip generating plots (faster)
         """
+        start_time = time.time()
         print("\nOptimizing portfolio allocation...")
         
         # CRITICAL FIX 6: Add more robust pre-checks before optimization
@@ -847,12 +813,12 @@ class PortfolioOptimizer:
             print(f"Optimizing {len(opt_tickers)} tickers (excluding cash assets)")
                 
             # Extract relevant returns and covariance
-            opt_returns = self.mean_returns[opt_tickers]
-            opt_cov = self.cov_matrix.loc[opt_tickers, opt_tickers]
+            opt_returns = self.mean_returns[opt_tickers].values  # Extract values for faster operations
+            opt_cov = self.cov_matrix.loc[opt_tickers, opt_tickers].values
         else:
             opt_tickers = self.tickers
-            opt_returns = self.mean_returns
-            opt_cov = self.cov_matrix
+            opt_returns = self.mean_returns.values  # Extract values for faster operations  
+            opt_cov = self.cov_matrix.values
             print(f"Optimizing {len(opt_tickers)} tickers")
         
         n_assets = len(opt_tickers)
@@ -860,7 +826,7 @@ class PortfolioOptimizer:
         bounds = tuple((0, 1) for _ in range(n_assets))
         initial_weights = np.array([1/n_assets] * n_assets)
 
-        # CRITICAL FIX 10: More robust optimization with better handling of optimization failures
+        # More efficient optimization function using numpy arrays directly
         def negative_sharpe(weights):
             ret = np.sum(opt_returns * weights)
             vol = np.sqrt(np.dot(weights.T, np.dot(opt_cov, weights)))
@@ -869,11 +835,19 @@ class PortfolioOptimizer:
             return -sharpe
             
         # Add multiple optimization attempts with different initial values
+        optimization_start = time.time()
         for attempt in range(3):  # Try up to 3 different initial values
             try:
                 if attempt > 0:
                     # On retry, use different initial weights - bias toward high Sharpe assets
-                    sharpes = (opt_returns - self.risk_free_rate) / np.sqrt(np.diag(opt_cov))
+                    if isinstance(opt_returns, np.ndarray):
+                        opt_returns_array = opt_returns
+                        opt_cov_array = opt_cov
+                    else:
+                        opt_returns_array = opt_returns.values
+                        opt_cov_array = opt_cov.values
+                        
+                    sharpes = (opt_returns_array - self.risk_free_rate) / np.sqrt(np.diag(opt_cov_array))
                     sharpes = np.clip(sharpes, 0, None)  # Only consider positive Sharpe ratios
                     if sharpes.sum() > 0:
                         initial_weights = sharpes / sharpes.sum()
@@ -884,8 +858,8 @@ class PortfolioOptimizer:
                     print(f"Optimization attempt {attempt+1}: Using alternative initial weights")
                     
                 result = minimize(negative_sharpe, initial_weights, method='SLSQP',
-                                 bounds=bounds, constraints=constraints, 
-                                 options={'maxiter': 1000, 'ftol': 1e-9})
+                                bounds=bounds, constraints=constraints, 
+                                options={'maxiter': 1000, 'ftol': 1e-9})
                                 
                 if result['success']:
                     print(f"✅ Optimization successful after {attempt+1} attempt(s)")
@@ -900,12 +874,14 @@ class PortfolioOptimizer:
                 print(f"❌ Error during optimization attempt {attempt+1}: {str(e)}")
                 if attempt == 2:  # Last attempt
                     print("\nData diagnostics:")
-                    print(f"Shape of returns vector: {opt_returns.shape}")
-                    print(f"Shape of covariance matrix: {opt_cov.shape}")
+                    print(f"Shape of returns vector: {np.shape(opt_returns)}")
+                    print(f"Shape of covariance matrix: {np.shape(opt_cov)}")
                     print("First 5 returns:")
                     for i, ticker in enumerate(opt_tickers[:5]):
                         print(f"{ticker}: {opt_returns[i]:.4f}")
                     return None
+        
+        self.performance_stats['optimization_time'] = time.time() - optimization_start
             
         # Remainder of the optimization function continues as before
         # If we excluded cash, reincorporate cash assets with 0% allocation
@@ -943,11 +919,16 @@ class PortfolioOptimizer:
                 json.dump(weights_pct, f, indent=2)
             print(f"Optimal weights saved to {weights_file}")
             
-            # Plot portfolio allocation
-            self._plot_portfolio_weights(results['weights'])
-            
-            # Plot efficient frontier
-            self._plot_efficient_frontier(results)
+            # Skip plotting for faster performance if requested
+            if not skip_plots:
+                # Plot portfolio allocation
+                self._plot_portfolio_weights(results['weights'])
+                
+                # Plot efficient frontier
+                self._plot_efficient_frontier(results)
+        
+        self.performance_stats['total_optimization_time'] = time.time() - start_time
+        print(f"Portfolio optimization completed in {self.performance_stats['total_optimization_time']:.2f} seconds")
             
         return results
 
@@ -1012,21 +993,27 @@ class PortfolioOptimizer:
 
     def _plot_efficient_frontier(self, optimal_result: Dict) -> None:
         """Plot the efficient frontier with the optimal portfolio"""
+        start_time = time.time()
         try:
-            # Generate efficient frontier points
-            target_returns = np.linspace(min(self.mean_returns), max(self.mean_returns), 100)
+            # Reduce the number of points for faster computation
+            num_points = 30
+            target_returns = np.linspace(min(self.mean_returns), max(self.mean_returns), num_points)
             efficient_volatilities = []
+            
+            # Convert to numpy arrays for faster computation
+            mean_returns_array = self.mean_returns.values
+            cov_matrix_array = self.cov_matrix.values
             
             # Calculate volatility for each target return
             for target in target_returns:
                 # Minimize volatility subject to target return
                 def portfolio_volatility(weights):
-                    return np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
+                    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix_array, weights)))
                 
                 # Constraint (sum of weights = 1 and return = target)
                 constraints = [
                     {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target}
+                    {'type': 'eq', 'fun': lambda x: np.sum(mean_returns_array * x) - target}
                 ]
                 
                 n_assets = len(self.mean_returns)
@@ -1056,11 +1043,11 @@ class PortfolioOptimizer:
             
             # Plot individual assets
             vols = np.sqrt(np.diag(self.cov_matrix)) * 100
-            plt.scatter(vols, self.mean_returns * 100, s=50, alpha=0.7, label='Individual Assets')
+            plt.scatter(vols, self.mean_returns.values * 100, s=50, alpha=0.7, label='Individual Assets')
             
-            # Add labels for assets
+            # Add labels for assets - FIX: Use iloc instead of integer indexing
             for i, ticker in enumerate(self.tickers):
-                plt.annotate(ticker, xy=(vols[i], self.mean_returns[i] * 100), xytext=(5, 5), 
+                plt.annotate(ticker, xy=(vols[i], self.mean_returns.iloc[i] * 100), xytext=(5, 5), 
                             textcoords='offset points', fontsize=9)
             
             # Add labels and title
@@ -1078,6 +1065,8 @@ class PortfolioOptimizer:
             
         except Exception as e:
             print(f"⚠️ Error creating efficient frontier plot: {str(e)}")
+            
+        self.performance_stats['efficient_frontier_time'] = time.time() - start_time
 
     def _plot_returns_comparison(self, returns_summary):
         """Plot comparison of returns and volatility"""
@@ -1171,8 +1160,17 @@ def main():
                         help='Skip cache standardization step')
     parser.add_argument('--keep-future-dates', action='store_true', 
                         help='Do not remove future dates during standardization')
+    # Add new performance-related arguments
+    parser.add_argument('--skip-plots', action='store_true', 
+                        help='Skip generating plots for faster performance')
+    parser.add_argument('--fast', action='store_true',
+                        help='Enable all performance optimizations')
     
     args = parser.parse_args()
+    
+    # If fast mode is enabled, set all performance flags
+    if args.fast:
+        args.skip_plots = True
     
     # Clear cache if requested
     if args.clear_cache:
@@ -1189,23 +1187,29 @@ def main():
         print(f"❌ Failed to load tickers: {str(e)}")
         return
 
-    # Initialize and run optimization
+    # Initialize and run optimization with timing information
+    total_start_time = time.time()
+    
     optimizer = PortfolioOptimizer(
         tickers, 
         risk_free_rate=args.risk_free,
         margin_cost_rate=args.margin_cost,
         years=args.years,
         output_dir=args.output_dir,
-        cache_dir=args.cache_dir
+        cache_dir=args.cache_dir,
+        debug=args.debug
     )
     
     print("🔄 Fetching data...")
+    fetch_start_time = time.time()
     optimizer.fetch_data(
         years=args.years,
         use_cache=not args.no_cache,
         batch_size=args.batch_size,
         max_workers=args.workers
     )
+    fetch_time = time.time() - fetch_start_time
+    print(f"Data fetching completed in {fetch_time:.2f} seconds")
     
     try:
         # Standardize cache IMMEDIATELY after fetching data
@@ -1237,154 +1241,85 @@ def main():
                     optimizer.div_data = pd.concat(div_data_dict, axis=1)
                 
                 print(f"✅ Successfully reloaded data for {len(price_data_dict)} tickers after standardization")
-        
-        # Add debug information before calculation
-        if args.debug:
-            print("\nData diagnostics before calculating returns:")
-            if optimizer.price_data is not None:
-                print(f"- Number of tickers with price data: {len(optimizer.price_data.columns)}")
-                print(f"- First 5 tickers: {', '.join(optimizer.price_data.columns[:5])}")
-                print(f"- Date range: {optimizer.price_data.index.min()} to {optimizer.price_data.index.max()}")
-                print(f"- Total dates: {len(optimizer.price_data.index)}")
-                print(f"- Current date: {pd.Timestamp.now().normalize()}")
-                print(f"- Future dates in data: {sum(optimizer.price_data.index > pd.Timestamp.now().normalize())}")
-        
-        print("🧮 Calculating returns...")
-        optimizer.calculate_returns()
-        
-        print("🎯 Optimizing portfolio...")
-        results = optimizer.optimize_portfolio(exclude_cash=args.exclude_cash)
-        
-        if not results:
-            print("❌ Portfolio optimization failed.")
-            # Try to run with fewer tickers as a fallback
-            print("\n🔄 Attempting optimization with fewer tickers...")
-            
-            # Get the top 20 tickers by Sharpe ratio
-            if optimizer.mean_returns is not None and len(optimizer.tickers) > 20:
-                sharpes = (optimizer.mean_returns - optimizer.risk_free_rate) / \
-                          np.sqrt(np.diag(optimizer.cov_matrix))
-                
-                # Sort tickers by Sharpe ratio
-                sorted_indices = np.argsort(-sharpes)  # Descending order
-                best_tickers = [optimizer.tickers[i] for i in sorted_indices[:20]]
-                
-                print(f"Selected top 20 tickers by Sharpe ratio: {', '.join(best_tickers)}")
-                
-                # CRITICAL FIX 11: Fix fallback optimizer initialization
-                fallback_optimizer = PortfolioOptimizer(
-                    best_tickers, 
-                    risk_free_rate=args.risk_free,
-                    margin_cost_rate=args.margin_cost,
-                    years=args.years,
-                    output_dir=args.output_dir + "_fallback",
-                    cache_dir=args.cache_dir  # Ensure we use the same cache
-                )
-                
-                # Initialize dataframes before copying data
-                fallback_optimizer.price_data = pd.DataFrame()
-                fallback_optimizer.div_data = pd.DataFrame()
-                
-                # Only copy data for tickers that exist in both optimizers
-                price_data_dict = {}
-                div_data_dict = {}
-                
-                print("Copying data for best tickers...")
-                for ticker in best_tickers:
-                    if ticker in optimizer.price_data.columns:
-                        price_data_dict[ticker] = optimizer.price_data[ticker]
-                    if ticker in optimizer.div_data.columns:
-                        div_data_dict[ticker] = optimizer.div_data[ticker]
-                
-                # Only create dataframes if we have data
-                if price_data_dict:
-                    fallback_optimizer.price_data = pd.concat(price_data_dict, axis=1)
-                if div_data_dict:
-                    fallback_optimizer.div_data = pd.concat(div_data_dict, axis=1)
-                
-                # Calculate returns and run optimization
-                fallback_optimizer.calculate_returns()
-                results = fallback_optimizer.optimize_portfolio(exclude_cash=args.exclude_cash)
-                
-                if not results:
-                    print("❌ Fallback optimization also failed.")
-                    return
-                else:
-                    print("✅ Fallback optimization succeeded!")
-            else:
-                return
-
-        # Print results
-        print("\nOptimal Portfolio Allocation:")
-        for ticker, weight in sorted(results['weights'].items(), key=lambda x: -x[1]):
-            if weight > 0.001:  # Only show positions with at least 0.1% allocation
-                print(f"{ticker}: {weight*100:.2f}%")
-        
-        print(f"\nUnleveraged Portfolio Metrics:")
-        print(f"Expected Return: {results['return']*100:.2f}%")
-        print(f"Volatility: {results['volatility']*100:.2f}%")
-        print(f"Sharpe Ratio: {results['sharpe']:.2f}")
-        
-        k = results['kelly_metrics']
-        print(f"\nKelly Criterion Results:")
-        print(f"Kelly Fraction: {k['kelly_fraction']:.2f}x")
-        print(f"Recommended Leverage: {k['safe_kelly']:.2f}x")
-        print(f"Leveraged Expected Return: {k['leveraged_return']*100:.2f}%")
-        print(f"Leveraged Volatility: {k['leveraged_volatility']*100:.2f}%")
-        print(f"Leveraged Sharpe Ratio: {k['leveraged_sharpe']:.2f}")
-        
-        if k['kelly_fraction'] > 2:
-            print("\nWarning: Kelly leverage > 2x. Consider using lower leverage for safety.")
-            
     except Exception as e:
-        print(f"\n❌ Error during optimization: {str(e)}")
-        
-        # More detailed diagnostics when debug is enabled
-        if args.debug:
-            import traceback
-            traceback.print_exc()
-            
-            # Check cache directory for issues
-            print("\nChecking cache:")
-            try:
-                status = optimizer.cache.get_cache_status()
-                print(f"- Cache status: {status}")
-            except Exception as ce:
-                print(f"- Error checking cache: {str(ce)}")
-            
-            # Try to inspect data files directly
-            try:
-                import glob
-                price_files = glob.glob(os.path.join(optimizer.cache_dir, "prices", "*_price.csv"))
-                print(f"- Found {len(price_files)} price files in cache")
-                
-                if price_files:
-                    sample_file = price_files[0]
-                    print(f"- Sample file: {sample_file}")
-                    sample_df = pd.read_csv(sample_file, index_col=0, parse_dates=True)
-                    print(f"- Sample data shape: {sample_df.shape}")
-                    print(f"- Sample date range: {sample_df.index.min()} to {sample_df.index.max()}")
-            except Exception as fe:
-                print(f"- Error inspecting files: {str(fe)}")
-        
-        # Additional diagnostic information
-        print("\nDiagnostic information:")
+        print(f"❌ Cache standardization error: {str(e)}")
+    
+    # Add debug information before calculation
+    if args.debug:
+        print("\nData diagnostics before calculating returns:")
         if optimizer.price_data is not None:
             print(f"- Number of tickers with price data: {len(optimizer.price_data.columns)}")
             print(f"- First 5 tickers: {', '.join(optimizer.price_data.columns[:5])}")
             print(f"- Date range: {optimizer.price_data.index.min()} to {optimizer.price_data.index.max()}")
-            print(f"- Missing values summary:")
-            for col in optimizer.price_data.columns[:10]:  # Show first 10 tickers
-                missing = optimizer.price_data[col].isna().sum()
-                if missing > 0:
-                    print(f"  {col}: {missing} missing values ({missing/len(optimizer.price_data)*100:.1f}%)")
+            print(f"- Total dates: {len(optimizer.price_data.index)}")
+            print(f"- Current date: {pd.Timestamp.now().normalize()}")
+            print(f"- Future dates in data: {sum(optimizer.price_data.index > pd.Timestamp.now().normalize())}")
+    
+    print("🧮 Calculating returns...")
+    returns_start_time = time.time()
+    try:
+        optimizer.calculate_returns()
+        returns_time = time.time() - returns_start_time
+        print(f"Returns calculation completed in {returns_time:.2f} seconds")
         
+        # Display top 5 tickers by return if debug mode is enabled
+        if args.debug and hasattr(optimizer, 'returns_summary'):
+            print("\nAnnualized Return Metrics:")
+            print("Top 5 tickers by return:")
+            print("-" * 50)
+            # Sort by AnnReturn in descending order and take top 5
+            top_returns = optimizer.returns_summary.sort_values('AnnReturn', ascending=False).head(5)
+            for ticker, row in top_returns.iterrows():
+                print(f"{ticker}: Return = {row['AnnReturn']:.2f}%, " +
+                     f"Volatility = {row['AnnVolatility']:.2f}%, " +
+                     f"Sharpe = {row['Sharpe']:.2f}")
+            print("-" * 50)
+        
+        print("🎯 Optimizing portfolio...")
+        result = optimizer.optimize_portfolio(exclude_cash=args.exclude_cash, skip_plots=args.skip_plots)
+        
+        if result:
+            # Print results
+            print("\nOptimal Portfolio Allocation:")
+            for ticker, weight in sorted(result['weights'].items(), key=lambda x: -x[1]):
+                if weight > 0.001:  # Only show positions with at least 0.1% allocation
+                    print(f"{ticker}: {weight*100:.2f}%")
+            
+            print(f"\nUnleveraged Portfolio Metrics:")
+            print(f"Expected Return: {result['return']*100:.2f}%")
+            print(f"Volatility: {result['volatility']*100:.2f}%")
+            print(f"Sharpe Ratio: {result['sharpe']:.2f}")
+            
+            k = result['kelly_metrics']
+            print(f"\nKelly Criterion Results:")
+            print(f"Kelly Fraction: {k['kelly_fraction']:.2f}x")
+            print(f"Recommended Leverage: {k['safe_kelly']:.2f}x")
+            print(f"Leveraged Expected Return: {k['leveraged_return']*100:.2f}%")
+            print(f"Leveraged Volatility: {k['leveraged_volatility']*100:.2f}%")
+            print(f"Leveraged Sharpe Ratio: {k['leveraged_sharpe']:.2f}")
+            
+            if k['kelly_fraction'] > 2:
+                print("\nWarning: Kelly leverage > 2x. Consider using lower leverage for safety.")
+        else:
+            print("❌ Portfolio optimization did not return valid results.")
+    except Exception as e:
+        print(f"\n❌ Error during portfolio analysis: {str(e)}")
+    
+    # Add performance summary at the end
+    total_time = time.time() - total_start_time
+    print(f"\nPerformance Summary:")
+    print(f"- Total execution time: {total_time:.2f} seconds")
+    print(f"- Data fetching: {fetch_time:.2f} seconds")
+    if 'returns_time' in locals():
+        print(f"- Returns calculation: {returns_time:.2f} seconds")
+    
+    if hasattr(optimizer, 'performance_stats'):
+        for key, value in optimizer.performance_stats.items():
+            print(f"- {key}: {value:.2f} seconds")
+        
+    # ...existing code...
+
     print(f"\n✅ Analysis complete. Results saved to {args.output_dir}")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-

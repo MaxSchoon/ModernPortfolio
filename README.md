@@ -83,8 +83,8 @@ The included shell script provides an easy way to run the optimizer with common 
 # Basic run
 python3 ModernPortfolio.py
 
-# With command line options
-python3 ModernPortfolio.py --years 3 --no-cache --risk-free 0.035 --margin-cost 0.06
+# With command line options (including --fast for performance)
+python3 ModernPortfolio.py --years 3 --no-cache --risk-free 0.035 --margin-cost 0.06 --fast
 ```
 
 ## Data Management Tools
@@ -220,6 +220,8 @@ The optimizer supports several advanced parameters:
 - Portfolio constraints
 - Cache management options
 - Data standardization settings
+- Fast: Enables all performance optimizations (also sets --skip-plots)
+- Skip-plots: Skips generating plots for faster execution
 
 For advanced usage, see the help documentation:
 

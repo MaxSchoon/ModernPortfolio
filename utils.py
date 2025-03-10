@@ -63,53 +63,6 @@ def load_tickers(csv_path: str) -> List[str]:
         print(f"Error reading tickers file: {str(e)}")
         raise
 
-def format_ticker(ticker: str) -> str:
-    """
-    Format ticker symbol for Yahoo Finance API
-    
-    Handles special cases and international exchanges
-    
-    Parameters:
-        ticker: The ticker symbol to format
-        
-    Returns:
-        Properly formatted ticker symbol for Yahoo Finance
-    """
-    # Handle special case for Danaos (DAC) which might be in the ticker list as 'Danaos'
-    if ticker.lower() == 'danaos':
-        return 'DAC'
-        
-    # Handle Flow Traders which should be FLOW.AS
-    if ticker.lower() == 'flow':
-        return 'FLOW.AS'
-        
-    # Handle HAL Trust which should be HAL.AS
-    if ticker.lower() == 'hal':
-        return 'HAL.AS'
-        
-    # For US stocks, nothing changes for most tickers
-    if '.' not in ticker and '-' not in ticker:
-        return ticker
-        
-    # Handle stocks with special characters
-    if '-' in ticker:  # Stocks like BRK-B need to be formatted as BRK-B
-        return ticker
-        
-    # Handle international exchanges
-    if ticker.endswith('.AS'):  # Amsterdam
-        return ticker
-    elif ticker.endswith('.L'):  # London
-        return ticker
-    elif ticker.endswith('.PA'):  # Paris 
-        return ticker
-    elif ticker.endswith('.DE'):  # Germany
-        return ticker
-    elif ticker.endswith('.MI'):  # Milan
-        return ticker
-    
-    # For other formats, leave as is
-    return ticker
-
 def get_exchange_suffix(country_code: str) -> Optional[str]:
     """
     Get the exchange suffix for a country code
@@ -346,6 +299,52 @@ def log_progress(message: str, title: bool = False, error: bool = False) -> None
 ###############################################################################
 # Helper Functions for Display
 ###############################################################################
+def format_ticker(ticker: str) -> str:
+    """
+    Format ticker symbol for Yahoo Finance API
+    
+    Handles special cases and international exchanges
+    
+    Parameters:
+        ticker: The ticker symbol to format
+        
+    Returns:
+        Properly formatted ticker symbol for Yahoo Finance
+    """
+    # Handle special case for Danaos (DAC) which might be in the ticker list as 'Danaos'
+    if ticker.lower() == 'danaos':
+        return 'DAC'
+        
+    # Handle Flow Traders which should be FLOW.AS
+    if ticker.lower() == 'flow':
+        return 'FLOW.AS'
+        
+    # Handle HAL Trust which should be HAL.AS
+    if ticker.lower() == 'hal':
+        return 'HAL.AS'
+        
+    # For US stocks, nothing changes for most tickers
+    if '.' not in ticker and '-' not in ticker:
+        return ticker
+        
+    # Handle stocks with special characters
+    if '-' in ticker:  # Stocks like BRK-B need to be formatted as BRK-B
+        return ticker
+        
+    # Handle international exchanges
+    if ticker.endswith('.AS'):  # Amsterdam
+        return ticker
+    elif ticker.endswith('.L'):  # London
+        return ticker
+    elif ticker.endswith('.PA'):  # Paris 
+        return ticker
+    elif ticker.endswith('.DE'):  # Germany
+        return ticker
+    elif ticker.endswith('.MI'):  # Milan
+        return ticker
+    
+    # For other formats, leave as is
+    return ticker
 
 def print_info(message: str) -> None:
     """Print an informational message"""
