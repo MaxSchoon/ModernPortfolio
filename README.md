@@ -222,12 +222,52 @@ The optimizer supports several advanced parameters:
 - Data standardization settings
 - Fast: Enables all performance optimizations (also sets --skip-plots)
 - Skip-plots: Skips generating plots for faster execution
+- Shorts: Allows short selling (negative weights) in portfolio optimization
+- Machine Learning: Use ML-based optimization approaches
 
 For advanced usage, see the help documentation:
 
 ```bash
 python3 ModernPortfolio.py --help
 ```
+
+### Short Selling
+
+The optimizer can now include short positions in the portfolio:
+
+```bash
+# Run optimizer with short selling enabled
+python3 ModernPortfolio.py --shorts
+
+# Combine with other options
+python3 ModernPortfolio.py --shorts --years 3 --risk-free 0.035
+```
+
+When short selling is enabled:
+- The optimization allows negative weights (short positions)
+- Separate pie charts are generated for long and short positions
+- The efficient frontier calculation includes the possibility of shorts
+
+### Machine Learning Optimization
+
+For portfolios with many assets or when traditional optimization fails to converge, you can use machine learning approaches:
+
+```bash
+# Use ML-based optimization
+python3 ModernPortfolio.py --use-ml
+
+# Combine with short selling
+python3 ModernPortfolio.py --use-ml --shorts
+
+# Full example with customization
+python3 ModernPortfolio.py --use-ml --shorts --max-long 70 --max-short 30
+```
+
+The ML approach uses:
+- Clustering algorithms for grouping similar assets
+- Principal Component Analysis for dimensionality reduction
+- Sharpe ratio-based allocations within clusters
+- Automatic adaptation to portfolio size and complexity
 
 ## License
 

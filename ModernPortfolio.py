@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 import time  # Add time for performance tracking
 
 # Import the CSV cache manager and cache standardizer
-from csv_cache_manager import CSVDataCache
+from src.csv_cache_manager import CSVDataCache
 try:
-    from cache_standardize import standardize_cache
+    from src.cache_standardize import standardize_cache
     HAS_STANDARDIZER = True
 except ImportError:
     print("Warning: cache_standardize module not found. Cache standardization will be skipped.")
@@ -22,7 +22,7 @@ except ImportError:
 
 # Only import utils modules if they exist - add a fallback
 try:
-    from utils import load_tickers, format_ticker
+    from src.utils import load_tickers, format_ticker
 except ImportError:
     # Define the functions here if utils.py doesn't exist
     def load_tickers(csv_path: str) -> List[str]:
@@ -99,7 +99,7 @@ except ImportError:
 
 # Try to import BatchFetcher, but define a simple version if it fails
 try:
-    from data_fetcher import DataFetcher
+    from src.data_fetcher import DataFetcher
 except ImportError:
     print("Warning: BatchFetcher module not found. Using simplified version.")
     
@@ -113,10 +113,20 @@ except ImportError:
             print("Simplified batch fetcher does not implement actual fetching")
             return {ticker: "Not implemented" for ticker in tickers}
 
+# Import the new graphing module
+try:
+    from src.graphing import (plot_price_data, plot_portfolio_weights,
+                           plot_efficient_frontier, plot_returns_comparison)
+    HAS_GRAPHING = True
+except ImportError:
+    print("Warning: graphing module not found. Using built-in plotting functions.")
+    HAS_GRAPHING = False
+
 class PortfolioOptimizer:
     def __init__(self, tickers: List[str], risk_free_rate: float = 0.04, margin_cost_rate: float = 0.065, 
                 years: int = 5, output_dir: str = "portfolio_analysis", cache_dir: str = "data_cache",
-                debug: bool = False):
+                debug: bool = False, shorts: bool = False, max_long: float = 1.0, max_short: float = 0.3, 
+                exclude_cash: bool = False):
         self.tickers = tickers
         self.risk_free_rate = risk_free_rate
         self.margin_cost_rate = margin_cost_rate
@@ -130,6 +140,10 @@ class PortfolioOptimizer:
         self.charts_dir = os.path.join(output_dir, "price_charts")
         self.cache_dir = cache_dir
         self.debug = debug
+        self.shorts = shorts  # Add shorts flag
+        self.max_long = max_long  # Maximum allocation to long positions (as a decimal)
+        self.max_short = max_short  # Maximum allocation to short positions (as a decimal)
+        self.exclude_cash = exclude_cash  # Add exclude_cash flag
         
         # Create output directories
         for directory in [output_dir, self.charts_dir]:
@@ -139,6 +153,11 @@ class PortfolioOptimizer:
         
         # Add performance tracking
         self.performance_stats = {}
+
+        # If exclude_cash is set, filter out cash tickers at initialization
+        if self.exclude_cash:
+            self.tickers = [t for t in self.tickers if t not in ['CASH', 'TBILLS']]
+            print(f"Exclude cash mode: Removed CASH and TBILLS from tickers list")
 
     def validate_data(self, ticker: str, prices: pd.Series, dividends: Optional[pd.Series] = None) -> bool:
         """Validate data quality for a given ticker"""
@@ -350,6 +369,13 @@ class PortfolioOptimizer:
             print(f"\n❌ The following tickers failed to load: {', '.join(failed_tickers)}")
             self.tickers = [t for t in self.tickers if t in self.price_data.columns]
         
+        # Only create synthetic assets if not excluding cash
+        if not self.exclude_cash:
+            for synthetic in ['CASH', 'TBILLS']:
+                if synthetic not in self.tickers:
+                    self.tickers.append(synthetic)
+                    self._create_synthetic_asset(synthetic, self.price_data.index if not self.price_data.empty else None)
+        
         print(f"\n✅ Successfully loaded data for {len(self.tickers)} tickers")
 
     def _create_synthetic_asset(self, ticker: str, common_index=None):
@@ -401,28 +427,34 @@ class PortfolioOptimizer:
 
     def _plot_price_data(self, ticker: str, price_data: pd.Series) -> None:
         """Plot price data and save to file"""
-        try:
-            plt.figure(figsize=(10, 6))
-            plt.plot(price_data.index, price_data.values)
-            plt.title(f"{ticker} Price History")
-            plt.xlabel("Date")
-            plt.ylabel("Price ($)")
-            plt.grid(True)
-            
-            # Add annotations for start/end prices
-            start_price = price_data.iloc[0]
-            end_price = price_data.iloc[-1]
-            plt.annotate(f"${start_price:.2f}", xy=(price_data.index[0], start_price),
-                        xytext=(10, 10), textcoords="offset points")
-            plt.annotate(f"${end_price:.2f}", xy=(price_data.index[-1], end_price),
-                        xytext=(-40, 10), textcoords="offset points")
-            
-            # Save plot to the charts directory instead of main output directory
-            plot_file = os.path.join(self.charts_dir, f"{ticker}_price.png")
-            plt.savefig(plot_file)
-            plt.close()
-        except Exception as e:
-            print(f"⚠️ Error creating plot for {ticker}: {str(e)}")
+        if HAS_GRAPHING:
+            try:
+                plot_price_data(ticker, price_data, output_dir=self.charts_dir)
+            except Exception as e:
+                print(f"⚠️ Error creating plot for {ticker}: {str(e)}")
+        else:
+            try:
+                plt.figure(figsize=(10, 6))
+                plt.plot(price_data.index, price_data.values)
+                plt.title(f"{ticker} Price History")
+                plt.xlabel("Date")
+                plt.ylabel("Price ($)")
+                plt.grid(True)
+                
+                # Add annotations for start/end prices
+                start_price = price_data.iloc[0]
+                end_price = price_data.iloc[-1]
+                plt.annotate(f"${start_price:.2f}", xy=(price_data.index[0], start_price),
+                            xytext=(10, 10), textcoords="offset points")
+                plt.annotate(f"${end_price:.2f}", xy=(price_data.index[-1], end_price),
+                            xytext=(-40, 10), textcoords="offset points")
+                
+                # Save plot to the charts directory instead of main output directory
+                plot_file = os.path.join(self.charts_dir, f"{ticker}_price.png")
+                plt.savefig(plot_file)
+                plt.close()
+            except Exception as e:
+                print(f"⚠️ Error creating plot for {ticker}: {str(e)}")
 
     def calculate_returns(self) -> None:
         """Calculate return metrics from price and dividend data"""
@@ -451,6 +483,38 @@ class PortfolioOptimizer:
         # Use the aligned data
         prices_df = aligned_data['prices']
         div_df = aligned_data['dividends']
+        
+        # CRITICAL FIX: Validate data shapes before calculations
+        if prices_df.shape != div_df.shape:
+            print(f"⚠️ Shape mismatch detected: prices={prices_df.shape}, dividends={div_df.shape}")
+            # Ensure both DataFrames have the same index
+            common_index = prices_df.index.intersection(div_df.index)
+            if len(common_index) < min(len(prices_df), len(div_df)) * 0.9:  # If we lose >10% of data
+                print(f"❌ Major index mismatch: common dates={len(common_index)}, prices={len(prices_df)}, dividends={len(div_df)}")
+                print("Attempting to rebuild dividend data with price index...")
+            
+            # Re-index both DataFrames to the common dates
+            prices_df = prices_df.loc[common_index]
+            div_df = div_df.loc[common_index]
+            
+            # Final verification
+            if prices_df.shape != div_df.shape:
+                print(f"❌ Data alignment failed. Creating zero dividends with matching shape.")
+                # Create a new dividends DataFrame with zeros that exactly matches prices
+                div_df = pd.DataFrame(0.0, index=prices_df.index, columns=prices_df.columns)
+        
+        # Verify tickers match in both DataFrames
+        price_cols = set(prices_df.columns)
+        div_cols = set(div_df.columns)
+        if price_cols != div_cols:
+            print(f"⚠️ Column mismatch: prices has {len(price_cols)} columns, dividends has {len(div_cols)} columns")
+            # Use only columns that exist in both
+            common_cols = list(price_cols.intersection(div_cols))
+            prices_df = prices_df[common_cols]
+            div_df = div_df[common_cols]
+            # Update tickers list to reflect only the common columns
+            self.tickers = [t for t in self.tickers if t in common_cols]
+            print(f"Using {len(common_cols)} common tickers for calculations")
         
         # Identify synthetic assets
         synthetic_tickers = [t for t in self.tickers if t in ['CASH', 'TBILLS']]
@@ -659,13 +723,29 @@ class PortfolioOptimizer:
         # Apply forward and backward fill in one step
         price_df = price_df.ffill().bfill()
         
-        # Add synthetic assets efficiently
+        # CRITICAL FIX: Ensure synthetic assets are created with EXACT same index as real data
         for ticker in synthetic_tickers:
+            # Remove any existing synthetic data to avoid shape issues
             if ticker in self.price_data.columns:
-                self._create_synthetic_asset(ticker, price_df.index)
-                price_df[ticker] = self.price_data[ticker]
-                div_df[ticker] = self.div_data[ticker]
-                print(f"✅ {ticker}: Successfully added synthetic data to aligned dataset")
+                self.price_data = self.price_data.drop(ticker, axis=1)
+            if ticker in self.div_data.columns:
+                self.div_data = self.div_data.drop(ticker, axis=1)
+            
+            # Create new synthetic data with exact same index as price_df
+            self._create_synthetic_asset(ticker, price_df.index)
+            
+            # Add the new synthetic data to our DataFrames
+            price_df[ticker] = self.price_data[ticker].loc[price_df.index]
+            div_df[ticker] = self.div_data[ticker].loc[price_df.index]
+            print(f"✅ {ticker}: Successfully added synthetic data to aligned dataset")
+        
+        # Verify final shapes match
+        if price_df.shape != div_df.shape:
+            print(f"❌ CRITICAL ERROR: Final shapes don't match: price={price_df.shape}, div={div_df.shape}")
+            # Force alignment as last resort
+            common_index = price_df.index.intersection(div_df.index)
+            price_df = price_df.loc[common_index]
+            div_df = div_df.loc[common_index]
         
         # Update ticker list 
         self.tickers = price_df.columns.tolist()
@@ -706,6 +786,7 @@ class PortfolioOptimizer:
             exclude_cash: If True, exclude CASH and TBILLS from optimization
             skip_plots: If True, skip generating plots (faster)
         """
+        optimization_start = time.time()
         start_time = time.time()
         print("\nOptimizing portfolio allocation...")
         
@@ -810,94 +891,231 @@ class PortfolioOptimizer:
             print(f"Optimizing {len(opt_tickers)} tickers")
         
         n_assets = len(opt_tickers)
-        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        bounds = tuple((0, 1) for _ in range(n_assets))
-        initial_weights = np.array([1/n_assets] * n_assets)
-
-        # More efficient optimization function using numpy arrays directly
-        def negative_sharpe(weights):
-            ret = np.sum(opt_returns * weights)
-            vol = np.sqrt(np.dot(weights.T, np.dot(opt_cov, weights)))
-            vol = max(vol, 1e-8)  # Prevent division by zero
-            sharpe = (ret - self.risk_free_rate) / vol
-            return -sharpe
-            
-        # Add multiple optimization attempts with different initial values
-        optimization_start = time.time()
-        for attempt in range(3):  # Try up to 3 different initial values
-            try:
-                if attempt > 0:
-                    # On retry, use different initial weights - bias toward high Sharpe assets
-                    if isinstance(opt_returns, np.ndarray):
-                        opt_returns_array = opt_returns
-                        opt_cov_array = opt_cov
-                    else:
-                        opt_returns_array = opt_returns.values
-                        opt_cov_array = opt_cov.values
-                        
-                    sharpes = (opt_returns_array - self.risk_free_rate) / np.sqrt(np.diag(opt_cov_array))
-                    sharpes = np.clip(sharpes, 0, None)  # Only consider positive Sharpe ratios
-                    if sharpes.sum() > 0:
-                        initial_weights = sharpes / sharpes.sum()
-                    else:
-                        # Randomize weights but still sum to 1
-                        initial_weights = np.random.random(n_assets)
-                        initial_weights = initial_weights / initial_weights.sum()
-                    print(f"Optimization attempt {attempt+1}: Using alternative initial weights")
-                    
-                result = minimize(negative_sharpe, initial_weights, method='SLSQP',
-                                bounds=bounds, constraints=constraints, 
-                                options={'maxiter': 1000, 'ftol': 1e-9})
-                                
-                if result['success']:
-                    print(f"✅ Optimization successful after {attempt+1} attempt(s)")
-                    break
-                else:
-                    print(f"⚠️ Attempt {attempt+1} failed: {result['message']}")
-                    if attempt == 2:  # Last attempt
-                        print(f"❌ All optimization attempts failed")
-                        return None
-                        
-            except Exception as e:
-                print(f"❌ Error during optimization attempt {attempt+1}: {str(e)}")
-                if attempt == 2:  # Last attempt
-                    print("\nData diagnostics:")
-                    print(f"Shape of returns vector: {np.shape(opt_returns)}")
-                    print(f"Shape of covariance matrix: {np.shape(opt_cov)}")
-                    print("First 5 returns:")
-                    for i, ticker in enumerate(opt_tickers[:5]):
-                        print(f"{ticker}: {opt_returns[i]:.4f}")
-                    return None
         
+        # Set up constraints based on whether shorts are allowed
+        if self.shorts:
+            print("Enabling short selling (allowing negative weights)")
+            print(f"Maximum long exposure: {self.max_long*100:.0f}%, Maximum short exposure: {self.max_short*100:.0f}%")
+            
+            # Reparameterize weights for long-short optimization
+            # Each asset gets two variables: one for long position, one for short position
+            # Instead of bounds from -1 to 1, we'll have bounds from 0 to max_long for long positions
+            # and 0 to max_short for short positions
+            bounds = tuple([(0, self.max_long) for _ in range(n_assets)] + 
+                           [(0, self.max_short) for _ in range(n_assets)])
+            
+            # Define constraint for gross exposure = 1
+            # w_1^+ + w_2^+ + ... + w_n^+ + w_1^- + w_2^- + ... + w_n^- = 1
+            sum_constraint = {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}
+            
+            # Define objective function that works with the 2n variables
+            def negative_sharpe_reparameterized(x):
+                # Extract long and short components
+                long_weights = x[:n_assets]
+                short_weights = x[n_assets:]
+                
+                # Calculate net weights: w_i = w_i^+ - w_i^-
+                net_weights = long_weights - short_weights
+                
+                # Calculate return and volatility using net weights
+                ret = np.sum(opt_returns * net_weights)
+                vol = np.sqrt(np.dot(net_weights.T, np.dot(opt_cov, net_weights)))
+                vol = max(vol, 1e-8)  # Prevent division by zero
+                sharpe = (ret - self.risk_free_rate) / vol
+                return -sharpe
+                
+            # Create a balanced initial guess that respects constraints
+            # Allocate 80% of the weights to the long part and 20% to the short part
+            init_guess = np.zeros(2 * n_assets)
+            
+            # For long weights: use 80% of available weight space
+            long_weights_raw = np.random.dirichlet(np.ones(n_assets)) * self.max_long * 0.95
+            
+            # For short weights: use 20% of available weight space
+            short_weights_raw = np.random.dirichlet(np.ones(n_assets)) * self.max_short * 0.95
+            
+            # Combine them ensuring the total sums to 1
+            total_weight = np.sum(long_weights_raw) + np.sum(short_weights_raw)
+            scaling_factor = 1.0 / total_weight
+            
+            # Set initial guess
+            init_guess[:n_assets] = long_weights_raw * scaling_factor
+            init_guess[n_assets:] = short_weights_raw * scaling_factor
+            
+            # Validate the initial guess
+            total_init = np.sum(init_guess)
+            print(f"Initial guess: Long={np.sum(init_guess[:n_assets]):.3f}, Short={np.sum(init_guess[n_assets:]):.3f}, Total={total_init:.3f}")
+            
+            # Use the reparameterized negative_sharpe function for optimization
+            constraints = (sum_constraint,)
+            
+            # Use more aggressive optimization settings
+            optimization_start = time.time()
+            for attempt in range(5):
+                try:
+                    if attempt > 0:
+                        # Try different initialization strategies on subsequent attempts
+                        if attempt == 1:
+                            # Try focusing on high Sharpe assets for long, low Sharpe for short
+                            sharpes = (opt_returns - self.risk_free_rate) / np.sqrt(np.diag(opt_cov))
+                            
+                            # Normalize Sharpe ratios to [0,1] range
+                            normalized_sharpes = (sharpes - np.min(sharpes)) / (np.max(sharpes) - np.min(sharpes) + 1e-8)
+                            
+                            # Use normalized Sharpe ratios for weighting
+                            long_weights = normalized_sharpes * self.max_long * 0.95
+                            short_weights = (1 - normalized_sharpes) * self.max_short * 0.95
+                            
+                            # Normalize to ensure sum equals 1
+                            total = np.sum(long_weights) + np.sum(short_weights)
+                            long_weights = long_weights / total
+                            short_weights = short_weights / total
+                            
+                            init_guess = np.concatenate([long_weights, short_weights])
+                        
+                        elif attempt == 2:
+                            # Try completely random weights, still respecting constraints
+                            init_guess = np.random.random(2 * n_assets)
+                            # Scale long and short parts separately
+                            long_sum = np.sum(init_guess[:n_assets])
+                            short_sum = np.sum(init_guess[n_assets:])
+                            
+                            if long_sum > 0:
+                                init_guess[:n_assets] = init_guess[:n_assets] / long_sum * self.max_long * 0.95
+                            if short_sum > 0:
+                                init_guess[n_assets:] = init_guess[n_assets:] / short_sum * self.max_short * 0.95
+                            
+                            # Normalize to sum to 1
+                            init_guess = init_guess / np.sum(init_guess)
+                        
+                        print(f"Optimization attempt {attempt+1}: Using alternative initial weights")
+                        print(f"Initial guess: Long={np.sum(init_guess[:n_assets]):.3f}, Short={np.sum(init_guess[n_assets:]):.3f}, Total={np.sum(init_guess):.3f}")
+                    
+                    # Use more aggressive optimization settings
+                    result = minimize(negative_sharpe_reparameterized, init_guess, method='SLSQP',
+                                 bounds=bounds, constraints=constraints,
+                                 options={'maxiter': 10000, 'ftol': 1e-10, 'disp': True})
+                    
+                    if result['success']:
+                        print(f"✅ Optimization successful after {attempt+1} attempt(s)")
+                        break
+                    else:
+                        print(f"⚠️ Attempt {attempt+1} failed: {result['message']}")
+                        # Continue to next attempt with different initialization
+                
+                except Exception as e:
+                    print(f"❌ Error during optimization attempt {attempt+1}: {str(e)}")
+                    if attempt == 4:  # Last attempt
+                        print("\nOptimization diagnostics:")
+                        print(f"Shape of returns vector: {np.shape(opt_returns)}")
+                        print(f"Shape of covariance matrix: {np.shape(opt_cov)}")
+                        return None
+            
+            # Extract the optimized weights
+            if result['success']:
+                long_weights = result.x[:n_assets]
+                short_weights = result.x[n_assets:]
+                
+                # Calculate net weights
+                optimized_weights = long_weights - short_weights
+                
+                # Perform post-optimization rescaling to ensure constraints are exactly met
+                # Calculate actual long and short exposures
+                actual_long = np.sum(np.maximum(optimized_weights, 0))
+                actual_short = np.sum(np.abs(np.minimum(optimized_weights, 0)))
+                
+                print(f"Optimized weights before rescaling:")
+                print(f"Long exposure: {actual_long:.4f}, Short exposure: {actual_short:.4f}")
+                print(f"Net exposure: {np.sum(optimized_weights):.4f}")
+                
+                # If we exceed constraints, scale back proportionally
+                if actual_long > self.max_long or actual_short > self.max_short:
+                    print("Rescaling weights to strictly enforce exposure limits...")
+                    long_scale = min(1.0, self.max_long / max(actual_long, 1e-8))
+                    short_scale = min(1.0, self.max_short / max(actual_short, 1e-8))
+                    
+                    # Apply scaling
+                    positive_weights = np.maximum(optimized_weights, 0) * long_scale
+                    negative_weights = np.minimum(optimized_weights, 0) * short_scale
+                    
+                    # Combine
+                    optimized_weights = positive_weights + negative_weights
+                    
+                    # Ensure the net sum is still 1.0 (can be slightly off due to scaling)
+                    optimized_weights = optimized_weights / np.sum(optimized_weights) if np.sum(optimized_weights) != 0 else optimized_weights
+                    
+                    # Calculate final exposures after scaling
+                    final_long = np.sum(np.maximum(optimized_weights, 0))
+                    final_short = np.sum(np.abs(np.minimum(optimized_weights, 0)))
+                    print(f"Exposures after rescaling: Long={final_long:.4f}, Short={final_short:.4f}, Net={np.sum(optimized_weights):.4f}")
+                
+                # Create the proper results dictionary instead of returning raw result
+                # Create dictionary of tickers to weights
+                weight_dict = dict(zip(opt_tickers, optimized_weights))
+                
+                # Calculate portfolio metrics with these weights
+                weights_array = np.array(optimized_weights)
+                port_ret = np.sum(opt_returns * weights_array)
+                port_vol = np.sqrt(np.dot(weights_array.T, np.dot(opt_cov, weights_array)))
+                port_sharpe = (port_ret - self.risk_free_rate) / port_vol if port_vol > 0 else 0
+                
+                # Create results dictionary
+                results = {
+                    'weights': weight_dict,
+                    'return': port_ret,
+                    'volatility': port_vol,
+                    'sharpe': port_sharpe,
+                    'kelly_metrics': self.calculate_kelly(port_ret, port_vol)
+                }
+                
+                # If we excluded cash, reincorporate cash assets with 0% allocation
+                if exclude_cash:
+                    full_weights = {}
+                    for ticker in self.tickers:
+                        if ticker in weight_dict:
+                            full_weights[ticker] = weight_dict[ticker]
+                        else:
+                            full_weights[ticker] = 0.0
+                    
+                    # Recalculate metrics with the full set of tickers
+                    weights_array = np.array([full_weights[t] for t in self.tickers])
+                    port_ret, port_vol, port_sharpe = self.portfolio_metrics(weights_array)
+                    
+                    results = {
+                        'weights': full_weights,
+                        'return': port_ret,
+                        'volatility': port_vol,
+                        'sharpe': port_sharpe,
+                        'kelly_metrics': self.calculate_kelly(port_ret, port_vol)
+                    }
+            else:
+                print(f"❌ All optimization attempts failed")
+                return None
+        else:
+            # Original long-only implementation
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            initial_weights = np.array([1/n_assets] * n_assets)
+
+            # Standard optimization function
+            def negative_sharpe(weights):
+                ret = np.sum(opt_returns * weights)
+                vol = np.sqrt(np.dot(weights.T, np.dot(opt_cov, weights)))
+                vol = max(vol, 1e-8)
+                sharpe = (ret - self.risk_free_rate) / vol
+                return -sharpe
+                
+            result = minimize(negative_sharpe, initial_weights, method='SLSQP', bounds=bounds, constraints=constraints)
+            
+            if result['success']:
+                optimized_weights = result.x
+                results = self.get_optimization_results(optimized_weights)
+            else:
+                print(f"❌ Optimization failed: {result['message']}")
+                return None
+
         self.performance_stats['optimization_time'] = time.time() - optimization_start
             
-        # Remainder of the optimization function continues as before
-        # If we excluded cash, reincorporate cash assets with 0% allocation
-        if exclude_cash:
-            full_weights = {}
-            result_weights = dict(zip(opt_tickers, result.x))
-            
-            for ticker in self.tickers:
-                if ticker in result_weights:
-                    full_weights[ticker] = result_weights[ticker]
-                else:
-                    full_weights[ticker] = 0.0
-                    
-            # Recalculate metrics with the full set of tickers
-            weights_array = np.array([full_weights[t] for t in self.tickers])
-            port_ret, port_vol, port_sharpe = self.portfolio_metrics(weights_array)
-            
-            results = {
-                'weights': full_weights,
-                'return': port_ret,
-                'volatility': port_vol,
-                'sharpe': port_sharpe,
-                'kelly_metrics': self.calculate_kelly(port_ret, port_vol)
-            }
-        else:
-            # Use normal results
-            results = self.get_optimization_results(result.x)
-        
         # Save optimization results
         if results:
             # Save weights as JSON
@@ -907,6 +1125,33 @@ class PortfolioOptimizer:
                 json.dump(weights_pct, f, indent=2)
             print(f"Optimal weights saved to {weights_file}")
             
+            # Print long and short allocations when shorts are enabled
+            if self.shorts:
+                # Separate long and short positions
+                long_positions = {k: v for k, v in results['weights'].items() if v > 0}
+                short_positions = {k: v for k, v in results['weights'].items() if v < 0}
+                
+                # Calculate sums
+                long_sum = sum(long_positions.values()) * 100
+                short_sum = abs(sum(short_positions.values())) * 100
+                
+                print(f"\nPortfolio Allocations with Short Selling:")
+                print(f"Total Long: {long_sum:.2f}% | Total Short: {short_sum:.2f}% | Net: 100.00%")
+                
+                if long_sum > self.max_long * 100 + 0.01 or short_sum > self.max_short * 100 + 0.01:
+                    print("⚠️ Warning: Exposure limits have been exceeded slightly due to optimization precision.")
+                    print("   Consider re-running the optimization with stricter constraints.")
+                
+                print("\nLong Positions:")
+                for ticker, weight in sorted(long_positions.items(), key=lambda x: -x[1]):
+                    if weight > 0.001:  # Only show positions with at least 0.1% allocation
+                        print(f"{ticker}: {weight*100:.2f}%")
+                
+                print("\nShort Positions:")
+                for ticker, weight in sorted(short_positions.items(), key=lambda x: x[1]):  # Sort by most negative
+                    if abs(weight) > 0.001:  # Only show positions with at least 0.1% allocation
+                        print(f"{ticker}: {weight*100:.2f}%")
+        
             # Skip plotting for faster performance if requested
             if not skip_plots:
                 # Plot portfolio allocation
@@ -952,148 +1197,266 @@ class PortfolioOptimizer:
         }
 
     def _plot_portfolio_weights(self, weights: Dict[str, float]) -> None:
-        """Plot portfolio weights as a pie chart"""
-        try:
-            # Convert weights to percentages for display
-            weights_pct = {k: v*100 for k, v in weights.items()}
-            
-            # Filter weights for readability (only include weights > 1%)
-            significant_weights = {k: v for k, v in weights_pct.items() if v > 1}
-            other_weight = 100 - sum(significant_weights.values())
-            
-            if other_weight > 0:
-                significant_weights['Other'] = other_weight
-            
-            plt.figure(figsize=(10, 8))
-            plt.pie(significant_weights.values(), labels=significant_weights.keys(), 
-                   autopct='%1.1f%%', startangle=90)
-            plt.axis('equal')
-            plt.title('Optimal Portfolio Allocation')
-            
-            # Save plot
-            plot_file = os.path.join(self.output_dir, "portfolio_allocation.png")
-            plt.savefig(plot_file)
-            plt.close()
-            print(f"Portfolio allocation chart saved to {plot_file}")
-            
-        except Exception as e:
-            print(f"⚠️ Error creating portfolio weights plot: {str(e)}")
+        """Plot portfolio weights as a pie chart - handling both long and short positions"""
+        if HAS_GRAPHING:
+            try:
+                plot_portfolio_weights(weights, output_dir=self.output_dir, allow_shorts=self.shorts)
+            except Exception as e:
+                print(f"⚠️ Error creating portfolio weights plot: {str(e)}")
+        else:
+            try:
+                # Convert weights to percentages for display
+                weights_pct = {k: v*100 for k, v in weights.items()}
+                
+                # Separate long and short positions
+                long_weights = {k: v for k, v in weights_pct.items() if v > 0}
+                short_weights = {k: abs(v) for k, v in weights_pct.items() if v < 0}
+                
+                # Count number of plots needed
+                has_long = len(long_weights) > 0
+                has_short = len(short_weights) > 0
+                
+                # Determine filename suffix based on shorts being allowed and used
+                filename_suffix = "_shorts" if self.shorts and has_short else ""
+                
+                if has_long and has_short:
+                    # Create a figure with two subplots
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+                    fig.suptitle('Optimal Portfolio Allocation (Long-Short Strategy)', fontsize=16)
+                    
+                    # Plot long positions
+                    # Filter weights for readability (only include weights > 1%)
+                    significant_long = {k: v for k, v in long_weights.items() if v > 1}
+                    other_long = sum(v for k, v in long_weights.items() if v <= 1)
+                    
+                    if other_long > 0:
+                        significant_long['Other (Long)'] = other_long
+                    
+                    ax1.pie(significant_long.values(), labels=significant_long.keys(), 
+                           autopct='%1.1f%%', startangle=90)
+                    ax1.set_title('Long Positions')
+                    ax1.axis('equal')
+                    
+                    # Plot short positions
+                    significant_short = {k: v for k, v in short_weights.items() if v > 1}
+                    other_short = sum(v for k, v in short_weights.items() if v <= 1)
+                    
+                    if other_short > 0:
+                        significant_short['Other (Short)'] = other_short
+                    
+                    ax2.pie(significant_short.values(), labels=significant_short.keys(), 
+                           autopct='%1.1f%%', startangle=90)
+                    ax2.set_title('Short Positions')
+                    ax2.axis('equal')
+                    
+                elif has_long:
+                    # Only long positions, create single plot
+                    plt.figure(figsize=(10, 8))
+                    
+                    # Filter weights for readability (only include weights > 1%)
+                    significant_weights = {k: v for k, v in long_weights.items() if v > 1}
+                    other_weight = sum(v for k, v in long_weights.items() if v <= 1)
+                    
+                    if other_weight > 0:
+                        significant_weights['Other'] = other_weight
+                    
+                    plt.pie(significant_weights.values(), labels=significant_weights.keys(), 
+                           autopct='%1.1f%%', startangle=90)
+                    plt.axis('equal')
+                    plt.title('Optimal Portfolio Allocation (Long Only)')
+                    
+                elif has_short:
+                    # Only short positions (unusual but possible)
+                    plt.figure(figsize=(10, 8))
+                    
+                    # Filter weights for readability (only include weights > 1%)
+                    significant_weights = {k: v for k, v in short_weights.items() if v > 1}
+                    other_weight = sum(v for k, v in short_weights.items() if v <= 1)
+                    
+                    if other_weight > 0:
+                        significant_weights['Other'] = other_weight
+                    
+                    plt.pie(significant_weights.values(), labels=significant_weights.keys(), 
+                           autopct='%1.1f%%', startangle=90)
+                    plt.axis('equal')
+                    plt.title('Optimal Portfolio Allocation (Short Only)')
+                
+                # Save plot with appropriate suffix
+                plot_file = os.path.join(self.output_dir, f"portfolio_allocation{filename_suffix}.png")
+                plt.savefig(plot_file)
+                plt.close()
+                print(f"Portfolio allocation chart saved to {plot_file}")
+                
+            except Exception as e:
+                print(f"⚠️ Error creating portfolio weights plot: {str(e)}")
 
     def _plot_efficient_frontier(self, optimal_result: Dict) -> None:
         """Plot the efficient frontier with the optimal portfolio"""
         start_time = time.time()
-        try:
-            # Reduce the number of points for faster computation
-            num_points = 30
-            target_returns = np.linspace(min(self.mean_returns), max(self.mean_returns), num_points)
-            efficient_volatilities = []
-            
-            # Convert to numpy arrays for faster computation
-            mean_returns_array = self.mean_returns.values
-            cov_matrix_array = self.cov_matrix.values
-            
-            # Calculate volatility for each target return
-            for target in target_returns:
-                # Minimize volatility subject to target return
-                def portfolio_volatility(weights):
-                    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix_array, weights)))
+        if HAS_GRAPHING:
+            try:
+                plot_efficient_frontier(
+                    self.mean_returns, 
+                    self.cov_matrix, 
+                    self.tickers, 
+                    optimal_result, 
+                    self.risk_free_rate,
+                    self.shorts, 
+                    self.max_long, 
+                    self.max_short,
+                    output_dir=self.output_dir
+                )
+            except Exception as e:
+                print(f"⚠️ Error creating efficient frontier plot: {str(e)}")
+        else:
+            try:
+                # Reduce the number of points for faster computation
+                num_points = 30
+                target_returns = np.linspace(min(self.mean_returns), max(self.mean_returns), num_points)
+                efficient_volatilities = []
                 
-                # Constraint (sum of weights = 1 and return = target)
-                constraints = [
-                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(mean_returns_array * x) - target}
-                ]
+                # Convert to numpy arrays for faster computation
+                mean_returns_array = self.mean_returns.values
+                cov_matrix_array = self.cov_matrix.values
                 
+                # Set bounds based on whether shorts are allowed
                 n_assets = len(self.mean_returns)
-                bounds = tuple((0, 1) for _ in range(n_assets))
-                init_guess = np.array([1.0/n_assets] * n_assets)
+                if self.shorts:
+                    bounds = tuple((-1, 1) for _ in range(n_assets))
+                    
+                    # Define a constraint for the sum of weights being 1 (net exposure)
+                    sum_constraint = {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}
+                    
+                    # Define constraints for maximum long and short exposure
+                    def long_exposure_constraint(weights):
+                        # Sum of all positive weights should be <= max_long
+                        return self.max_long - np.sum(np.maximum(weights, 0))
+                        
+                    def short_exposure_constraint(weights):
+                        # Sum of absolute values of all negative weights should be <= max_short
+                        return self.max_short - np.sum(np.abs(np.minimum(weights, 0)))
+                        
+                    constraints = [
+                        sum_constraint,
+                        {'type': 'ineq', 'fun': long_exposure_constraint},
+                        {'type': 'ineq', 'fun': short_exposure_constraint},
+                        {'type': 'eq', 'fun': lambda x: np.sum(mean_returns_array * x) - target}
+                    ]
+                else:
+                    bounds = tuple((0, 1) for _ in range(n_assets))
+                    # Constraint (sum of weights = 1 and return = target)
+                    constraints = [
+                        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                        {'type': 'eq', 'fun': lambda x: np.sum(mean_returns_array * x) - target}
+                    ]
                 
-                try:
-                    result = minimize(portfolio_volatility, init_guess, 
-                                     method='SLSQP', bounds=bounds, constraints=constraints)
-                    efficient_volatilities.append(result['fun'])
-                except:
-                    efficient_volatilities.append(np.nan)
-            
-            # Filter out any failed optimizations
-            valid = ~np.isnan(efficient_volatilities)
-            efficient_volatilities = np.array(efficient_volatilities)[valid]
-            efficient_returns = target_returns[valid]
-            
-            # Plot efficient frontier
-            plt.figure(figsize=(12, 8))
-            plt.plot(efficient_volatilities * 100, efficient_returns * 100, 'b-', label='Efficient Frontier')
-            
-            # Plot optimal portfolio
-            opt_return = optimal_result['return'] * 100
-            opt_vol = optimal_result['volatility'] * 100
-            plt.scatter(opt_vol, opt_return, s=100, color='r', marker='*', label='Optimal Portfolio')
-            
-            # Plot individual assets
-            vols = np.sqrt(np.diag(self.cov_matrix)) * 100
-            plt.scatter(vols, self.mean_returns.values * 100, s=50, alpha=0.7, label='Individual Assets')
-            
-            # Add labels for assets - FIX: Use iloc instead of integer indexing
-            for i, ticker in enumerate(self.tickers):
-                plt.annotate(ticker, xy=(vols[i], self.mean_returns.iloc[i] * 100), xytext=(5, 5), 
-                            textcoords='offset points', fontsize=9)
-            
-            # Add labels and title
-            plt.xlabel('Annualized Volatility (%)')
-            plt.ylabel('Annualized Return (%)')
-            plt.title('Efficient Frontier and Optimal Portfolio')
-            plt.grid(True)
-            plt.legend()
-            
-            # Save plot
-            plot_file = os.path.join(self.output_dir, "efficient_frontier.png")
-            plt.savefig(plot_file)
-            plt.close()
-            print(f"Efficient frontier plot saved to {plot_file}")
-            
-        except Exception as e:
-            print(f"⚠️ Error creating efficient frontier plot: {str(e)}")
+                # Calculate volatility for each target return
+                for target in target_returns:
+                    # Minimize volatility subject to target return
+                    def portfolio_volatility(weights):
+                        return np.sqrt(np.dot(weights.T, np.dot(cov_matrix_array, weights)))
+                    
+                    init_guess = np.array([1.0/n_assets] * n_assets)
+                    
+                    try:
+                        result = minimize(portfolio_volatility, init_guess, 
+                                        method='SLSQP', bounds=bounds, constraints=constraints)
+                        efficient_volatilities.append(result['fun'])
+                    except:
+                        efficient_volatilities.append(np.nan)
+                
+                # Filter out any failed optimizations
+                valid = ~np.isnan(efficient_volatilities)
+                efficient_volatilities = np.array(efficient_volatilities)[valid]
+                efficient_returns = target_returns[valid]
+                
+                # Plot efficient frontier
+                plt.figure(figsize=(12, 8))
+                plt.plot(efficient_volatilities * 100, efficient_returns * 100, 'b-', label='Efficient Frontier')
+                
+                # Plot optimal portfolio
+                opt_return = optimal_result['return'] * 100
+                opt_vol = optimal_result['volatility'] * 100
+                plt.scatter(opt_vol, opt_return, s=100, color='r', marker='*', label='Optimal Portfolio')
+                
+                # Plot individual assets
+                vols = np.sqrt(np.diag(self.cov_matrix)) * 100
+                plt.scatter(vols, self.mean_returns.values * 100, s=50, alpha=0.7, label='Individual Assets')
+                
+                # Add labels for assets - FIX: Use iloc instead of integer indexing
+                for i, ticker in enumerate(self.tickers):
+                    plt.annotate(ticker, xy=(vols[i], self.mean_returns.iloc[i] * 100), xytext=(5, 5), 
+                                textcoords='offset points', fontsize=9)
+                
+                # Add labels and title
+                plt.xlabel('Annualized Volatility (%)')
+                plt.ylabel('Annualized Return (%)')
+                plt.title('Efficient Frontier and Optimal Portfolio')
+                plt.grid(True)
+                plt.legend()
+                
+                # Save plot
+                plot_file = os.path.join(self.output_dir, "efficient_frontier.png")
+                plt.savefig(plot_file)
+                plt.close()
+                print(f"Efficient frontier plot saved to {plot_file}")
+                
+            except Exception as e:
+                print(f"⚠️ Error creating efficient frontier plot: {str(e)}")
             
         self.performance_stats['efficient_frontier_time'] = time.time() - start_time
 
     def _plot_returns_comparison(self, returns_summary):
         """Plot comparison of returns and volatility"""
-        try:
-            plt.figure(figsize=(12, 8))
-            
-            # Extract metrics
-            returns = returns_summary['AnnReturn']
-            vols = returns_summary['AnnVolatility']
-            sharpes = returns_summary['Sharpe']
-            
-            # Create scatter plot
-            plt.scatter(vols, returns, s=50, alpha=0.7)
-            
-            # Add labels for each point
-            for ticker, ret, vol in zip(returns.index, returns, vols):
-                plt.annotate(ticker, xy=(vol, ret), xytext=(5, 5), 
-                            textcoords='offset points', fontsize=9)
-            
-            # Add labels and title
-            plt.xlabel('Annualized Volatility (%)')
-            plt.ylabel('Annualized Return (%)')
-            plt.title('Risk-Return Profile of Assets')
-            plt.grid(True)
-            
-            # Add risk-free rate as horizontal line
-            plt.axhline(y=self.risk_free_rate*100, color='r', linestyle='--', 
-                       label=f'Risk-Free Rate ({self.risk_free_rate*100:.1f}%)')
-            
-            plt.legend()
-            
-            # Save plot
-            plot_file = os.path.join(self.output_dir, "risk_return_profile.png")
-            plt.savefig(plot_file)
-            plt.close()
-            print(f"Risk-return profile saved to {plot_file}")
-            
-        except Exception as e:
-            print(f"⚠️ Error creating returns comparison plot: {str(e)}")
+        if HAS_GRAPHING:
+            try:
+                plot_returns_comparison(returns_summary, self.risk_free_rate, 
+                                       output_dir=self.output_dir, allow_shorts=self.shorts)
+            except Exception as e:
+                print(f"⚠️ Error creating returns comparison plot: {str(e)}")
+        else:
+            try:
+                # Determine filename suffix based on shorts being allowed
+                filename_suffix = "_shorts" if self.shorts else ""
+                
+                plt.figure(figsize=(12, 8))
+                
+                # Extract metrics
+                returns = returns_summary['AnnReturn']
+                vols = returns_summary['AnnVolatility']
+                sharpes = returns_summary['Sharpe']
+                
+                # Create scatter plot
+                plt.scatter(vols, returns, s=50, alpha=0.7)
+                
+                # Add labels for each point
+                for ticker, ret, vol in zip(returns.index, returns, vols):
+                    plt.annotate(ticker, xy=(vol, ret), xytext=(5, 5), 
+                                textcoords='offset points', fontsize=9)
+                
+                # Add labels and title
+                plt.xlabel('Annualized Volatility (%)')
+                plt.ylabel('Annualized Return (%)')
+                title = 'Risk-Return Profile of Assets'
+                if self.shorts:
+                    title += ' (Short Selling Enabled)'
+                plt.title(title)
+                plt.grid(True)
+                
+                # Add risk-free rate as horizontal line
+                plt.axhline(y=self.risk_free_rate*100, color='r', linestyle='--', 
+                           label=f'Risk-Free Rate ({self.risk_free_rate*100:.1f}%)')
+                
+                plt.legend()
+                
+                # Save plot with appropriate suffix
+                plot_file = os.path.join(self.output_dir, f"risk_return_profile{filename_suffix}.png")
+                plt.savefig(plot_file)
+                plt.close()
+                print(f"Risk-return profile saved to {plot_file}")
+                
+            except Exception as e:
+                print(f"⚠️ Error creating returns comparison plot: {str(e)}")
 
     def standardize_cache_data(self, remove_future: bool = True) -> bool:
         """
@@ -1121,6 +1484,14 @@ class PortfolioOptimizer:
             print(f"⚠️ Error during cache standardization: {str(e)}")
         
         return False
+
+# Import ML optimizer if available
+try:
+    from src.ml_optimizer import MLPortfolioOptimizer
+    HAS_ML_OPTIMIZER = True
+except ImportError:
+    print("Warning: ML optimizer module not found. Using traditional optimization.")
+    HAS_ML_OPTIMIZER = False
 
 def main():
     # Set up argument parser for command line options
@@ -1153,6 +1524,16 @@ def main():
                         help='Skip generating plots for faster performance')
     parser.add_argument('--fast', action='store_true',
                         help='Enable all performance optimizations')
+    # Add short selling options
+    parser.add_argument('--shorts', action='store_true',
+                        help='Allow short positions in the portfolio')
+    parser.add_argument('--max-long', type=float, default=80.0,
+                        help='Maximum percentage allocated to long positions (default: 80%%)')
+    parser.add_argument('--max-short', type=float, default=20.0,
+                        help='Maximum percentage allocated to short positions (default: 20%%)')
+    # Add ML-related arguments
+    parser.add_argument('--use-ml', action='store_true',
+                        help='Use machine learning for portfolio optimization')
     
     args = parser.parse_args()
     
@@ -1185,7 +1566,10 @@ def main():
         years=args.years,
         output_dir=args.output_dir,
         cache_dir=args.cache_dir,
-        debug=args.debug
+        debug=args.debug,
+        shorts=args.shorts,  # Pass shorts argument
+        max_long=args.max_long/100.0,  # Convert percentage to decimal
+        max_short=args.max_short/100.0  # Convert percentage to decimal
     )
     
     print("🔄 Fetching data...")
@@ -1264,7 +1648,34 @@ def main():
             print("-" * 50)
         
         print("🎯 Optimizing portfolio...")
-        result = optimizer.optimize_portfolio(exclude_cash=args.exclude_cash, skip_plots=args.skip_plots)
+        
+        # Use ML optimizer if requested and available
+        if args.use_ml and HAS_ML_OPTIMIZER:
+            print("Using machine learning approach for portfolio optimization")
+            
+            # Create ML optimizer
+            ml_optimizer = MLPortfolioOptimizer(
+                optimizer.mean_returns,
+                optimizer.cov_matrix,
+                optimizer.tickers,
+                risk_free_rate=args.risk_free,
+                margin_cost_rate=args.margin_cost,
+                shorts=args.shorts,
+                max_long=args.max_long/100.0,
+                max_short=args.max_short/100.0,
+                debug=args.debug
+            )
+            
+            # Run ML optimization
+            result = ml_optimizer.optimize()
+            
+            # Plot results if needed
+            if not args.skip_plots:
+                optimizer._plot_portfolio_weights(result['weights'])
+                optimizer._plot_efficient_frontier(result)
+        else:
+            # Use traditional optimization
+            result = optimizer.optimize_portfolio(exclude_cash=args.exclude_cash, skip_plots=args.skip_plots)
         
         if result:
             # Print results
@@ -1304,8 +1715,6 @@ def main():
     if hasattr(optimizer, 'performance_stats'):
         for key, value in optimizer.performance_stats.items():
             print(f"- {key}: {value:.2f} seconds")
-        
-    # ...existing code...
 
     print(f"\n✅ Analysis complete. Results saved to {args.output_dir}")
 

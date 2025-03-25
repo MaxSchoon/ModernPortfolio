@@ -17,8 +17,8 @@ from datetime import datetime
 import sys
 from typing import List, Dict, Any, Optional
 
-from csv_cache_manager import CSVDataCache
-from utils import (
+from src.csv_cache_manager import CSVDataCache
+from src.utils import (
     validate_ticker, format_ticker, 
     print_info, print_success, print_warning, print_error
 )
