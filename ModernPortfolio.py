@@ -73,19 +73,7 @@ except ImportError:
             raise
 
     def format_ticker(ticker: str) -> str:
-        """Format ticker symbol for Yahoo Finance"""
-        # Handle special case for Danaos (DAC)
-        if ticker.lower() == 'danaos':
-            return 'DAC'
-            
-        # Handle Flow Traders which should be FLOW.AS
-        if ticker.lower() == 'flow':
-            return 'FLOW.AS'
-            
-        # Handle HAL Trust which should be HAL.AS
-        if ticker.lower() == 'hal':
-            return 'HAL.AS'
-            
+        """Format ticker symbol for Yahoo Finance""" 
         # For US stocks, nothing changes for most tickers
         if '.' not in ticker and '-' not in ticker:
             return ticker
@@ -480,7 +468,7 @@ class PortfolioOptimizer:
                     daily_rf = (1 + self.risk_free_rate) ** (1/252) - 1
                     total_returns[ticker] = daily_rf
                 elif ticker == 'TBILLS':
-                    daily_rf = (1 + self.risk_free_rate * 1.02) ** (1/252) - 1
+                    daily_rf = (1 + self.risk_free_rate * 1.15) ** (1/252) - 1
                     total_returns[ticker] = daily_rf
         
         # Calculate annualized returns
@@ -499,7 +487,7 @@ class PortfolioOptimizer:
                 if ticker == 'CASH':
                     variance = 1e-8  # Very low volatility for cash
                 else:  # TBILLS
-                    variance = 1e-5  # Higher volatility for T-bills (increased from 1e-6)
+                    variance = 0.0025  # Increased variance for T-bills to reflect a standard deviation of approximately 5%
                 
                 # Set near-zero correlation with all other assets
                 for i in range(len(self.tickers)):

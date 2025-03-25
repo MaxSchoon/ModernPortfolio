@@ -2,6 +2,17 @@ ticker;description
 GOOGL;Alphabet Inc
 BRK-B;Berkshire Hathaway Inc
 ASML.AS;ASML Holding NV
+PRX.AS;Prosus NV
+ING;ING Groep NV
+ABN.AS;ABN AMRO Bank NV
+DB;Deutsche Bank AG
+UBS;UBS Group AG
+GS;Goldman Sachs Group Inc
+MS;Morgan Stanley
+WFC;Wells Fargo & Company
+C;Citigroup Inc
+SHELL.AS;Royal Dutch Shell PLC
+PSH.L;Pershing Square Holdings Ltd
 BESI.AS;BE Semiconductor Industries NV
 ASM.AS;ASM International NV
 FLOW.AS;Flow Traders NV
@@ -12,8 +23,8 @@ NVDA;NVIDIA Corporation
 PLTR;Palantir Technologies Inc
 BTC-USD;Bitcoin
 ETH-USD;Ethereum
-SOL-USD;Solana
 MC.PA;LVMH Moet Hennessy Louis Vuitton SE
+JDEP.AS;JDE Peet's NV
 TNDM;Tandem Diabetes Care Inc
 AAPL;Apple Inc
 TSLA;Tesla Inc
@@ -47,6 +58,7 @@ LIN.DE;Linde plc
 AI.PA;Air Liquide SA
 DGE.L;Diageo plc
 NOVO-B.CO;Novo Nordisk A/S
+002594.SZ; BYD Company Limited
 ADYEN.AS;Adyen N.V.
 BMW.DE;Bayerische Motoren Werke AG
 SAN.MC;Banco Santander SA
@@ -63,7 +75,9 @@ TCEHY;Tencent Holdings Ltd
 JD;JD.com Inc
 BIDU;Baidu Inc
 NTES;NetEase Inc
+EQNR;Equinor ASA
 XPEV;XPeng Inc
+CNR; Core Natural Resources Inc
 LI;Li Auto Inc
 NIO;NIO Inc
 PDD;Pinduoduo Inc
@@ -89,7 +103,6 @@ UPS;United Parcel Service Inc.
 T;AT&T Inc
 LOW;Lowe's Companies Inc
 AMGN;Amgen Inc
-PM;Philip Morris International Inc
 HON;Honeywell International Inc
 IBM;International Business Machines Corp
 CAT;Caterpillar Inc
