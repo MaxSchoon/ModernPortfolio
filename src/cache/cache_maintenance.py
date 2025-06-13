@@ -41,8 +41,8 @@ except ImportError:
     HAS_COLOR = False
 
 # Import required utilities
-from csv_cache_manager import CSVDataCache
-from utils import (
+from src.cache.csv_cache_manager import CSVDataCache
+from src.utils.utils import (
     validate_ticker, format_ticker, print_info, print_success, 
     print_warning, print_error
 )

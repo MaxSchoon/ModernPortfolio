@@ -21,8 +21,8 @@ import itertools
 import colorama
 from colorama import Fore, Style
 
-from csv_cache_manager import CSVDataCache
-from utils import (
+from src.cache.csv_cache_manager import CSVDataCache
+from src.utils.utils import (
     load_tickers, 
     format_ticker, 
     validate_ticker, 
