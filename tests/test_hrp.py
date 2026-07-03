@@ -106,6 +106,30 @@ class TestValidation:
         with pytest.raises(DataValidationError, match="symmetric"):
             make_hrp([0.05, 0.04], cov)
 
+    def test_rejects_indefinite_covariance(self):
+        # Off-diagonal exceeding the diagonal: not a valid covariance. Review
+        # fuzzing showed such inputs made bisection shares leave [0, 1] and
+        # emit negative weights on a portfolio labeled long-only.
+        cov = np.array([[0.04, 0.09], [0.09, 0.04]])
+        with pytest.raises(DataValidationError, match="positive semi-definite"):
+            make_hrp([0.05, 0.06], cov)
+
+    def test_fuzzed_indefinite_inputs_never_yield_signed_weights(self):
+        # The reviewer's fuzz case: random symmetric-but-indefinite matrices
+        # must be rejected at construction, never allocated with signs.
+        rng = np.random.default_rng(0)
+        rejected = 0
+        for _ in range(200):
+            raw = rng.uniform(-0.2, 0.2, size=(5, 5))
+            cov = (raw + raw.T) / 2
+            np.fill_diagonal(cov, rng.uniform(0.01, 0.05, size=5))
+            if np.linalg.eigvalsh(cov)[0] >= -1e-8:
+                continue
+            with pytest.raises(DataValidationError):
+                make_hrp(list(rng.normal(0.05, 0.02, 5)), cov)
+            rejected += 1
+        assert rejected > 0, "fuzz premise failed: no indefinite matrices generated"
+
     def test_rejects_nan_inputs(self):
         with pytest.raises(DataValidationError, match="non-finite"):
             make_hrp([0.05, np.nan], np.diag([0.04, 0.04]))

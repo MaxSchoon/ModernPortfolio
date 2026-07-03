@@ -105,3 +105,69 @@ class TestMain:
         err = capsys.readouterr().err
         assert "long-only" in err
         assert "Traceback" not in err
+
+    def test_hrp_rejects_max_weight_instead_of_ignoring_it(self, tmp_path, capsys):
+        tickers = tmp_path / "tickers.csv"
+        tickers.write_text("ticker\nAAA\n")
+        code = main(
+            [
+                "--tickers-file",
+                str(tickers),
+                "--optimizer",
+                "hrp",
+                "--max-weight",
+                "0.6",
+                "--quiet",
+                "--cache-dir",
+                str(tmp_path / "cache"),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
+        assert code == EXIT_ERROR
+        assert "max-weight" in capsys.readouterr().err
+
+    def test_hrp_end_to_end_through_the_cli(self, tmp_path):
+        # Full path: cached prices → pipeline → HRP → charts → HTML report,
+        # via main() with zero network access (cache pre-seeded).
+        import json
+
+        import numpy as np
+        import pandas as pd
+        from src.cache.csv_cache_manager import CSVDataCache
+
+        cache = CSVDataCache(str(tmp_path / "cache"))
+        index = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=504)
+        rng = np.random.default_rng(11)
+        for ticker, drift in (("AAA", 0.0008), ("BBB", 0.0002), ("CCC", 0.0005)):
+            steps = rng.normal(drift, 0.01, size=504)
+            prices = pd.Series(100 * np.exp(np.cumsum(steps)), index=index)
+            assert cache.save_price_data(ticker, prices)
+        tickers = tmp_path / "tickers.csv"
+        tickers.write_text("ticker\nAAA\nBBB\nCCC\n")
+
+        out = tmp_path / "out"
+        code = main(
+            [
+                "--tickers-file",
+                str(tickers),
+                "--optimizer",
+                "hrp",
+                "--years",
+                "2",
+                "--no-standardize",
+                "--quiet",
+                "--cache-dir",
+                str(tmp_path / "cache"),
+                "--output-dir",
+                str(out),
+            ]
+        )
+        assert code == 0
+        report = (out / "report.html").read_text()
+        assert "hrp" in report
+        weights = json.loads((out / "optimal_weights.json").read_text())
+        assert set(weights) == {"AAA", "BBB", "CCC"}
+        assert all(w >= 0 for w in weights.values())
+        assert sum(weights.values()) == pytest.approx(100.0, abs=1e-6)
+        assert (out / "portfolio_allocation.png").stat().st_size > 0

@@ -75,6 +75,15 @@ class HRPOptimizer:
             raise DataValidationError("inputs contain non-finite values")
         if not np.allclose(self.cov_matrix, self.cov_matrix.T, atol=1e-8):
             raise DataValidationError("covariance matrix is not symmetric")
+        eigenvalues = np.linalg.eigvalsh((self.cov_matrix + self.cov_matrix.T) / 2.0)
+        if eigenvalues[0] < -1e-8 * max(eigenvalues[-1], _VOL_FLOOR):
+            # An indefinite "covariance" makes cluster variances negative,
+            # which pushes bisection shares outside [0, 1] — HRP would then
+            # emit negative weights while claiming to be long-only.
+            raise DataValidationError(
+                f"covariance matrix is not positive semi-definite (min eigenvalue "
+                f"{eigenvalues[0]:.3e}); check the return series for alignment problems"
+            )
         variances = np.diag(self.cov_matrix)
         if (variances <= 0).any():
             bad = [t for t, v in zip(self.tickers, variances, strict=True) if v <= 0]
@@ -103,6 +112,15 @@ class HRPOptimizer:
         else:
             order = self._quasi_diagonal_order()
             weights = self._recursive_bisection(order)
+
+        # Defense-in-depth: bisection shares live in [0, 1] and multiply down
+        # from 1, so any violation here means the inputs slipped past
+        # validation — refuse rather than mislabel the result long-only.
+        if (weights < -1e-12).any() or abs(weights.sum() - 1.0) > 1e-9:
+            raise DataValidationError(
+                "HRP produced an invalid allocation (negative weight or net != 1); "
+                "the covariance matrix is not a valid covariance"
+            )
 
         expected_return = float(weights @ self.mean_returns)
         volatility = float(np.sqrt(max(weights @ self.cov_matrix @ weights, 0.0)))
