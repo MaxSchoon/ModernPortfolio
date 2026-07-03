@@ -188,7 +188,11 @@ class MeanVarianceOptimizer:
                 f"mean_returns has shape {self.mean_returns.shape}, expected ({self._n},)"
             )
         if not np.isfinite(self.mean_returns).all():
-            bad = [t for t, r in zip(self.tickers, self.mean_returns, strict=True) if not np.isfinite(r)]
+            bad = [
+                t
+                for t, r in zip(self.tickers, self.mean_returns, strict=True)
+                if not np.isfinite(r)
+            ]
             raise DataValidationError(f"non-finite expected returns for: {', '.join(bad)}")
         if (
             self.config.mode is OptimizationMode.LONG_ONLY
@@ -298,11 +302,12 @@ class MeanVarianceOptimizer:
         objective,
         extra_constraints: list[dict] | None = None,
         context: str = "optimization",
+        warm_starts: list[np.ndarray] | None = None,
     ) -> np.ndarray:
         """Run SLSQP from several starts; return the best feasible solution."""
         best: tuple[float, np.ndarray] | None = None
         failures: list[str] = []
-        for start in self._starting_points():
+        for start in (warm_starts or []) + self._starting_points():
             result = minimize(
                 objective,
                 start,
@@ -426,6 +431,10 @@ class MeanVarianceOptimizer:
             raise ConfigurationError(f"frontier needs at least 2 points, got {points}")
         low, high = self._achievable_return_range()
         frontier: list[FrontierPoint] = []
+        # Continuation: each point warm-starts from its neighbor's solution.
+        # Without it, isolated SLSQP runs land on feasible-but-suboptimal
+        # points and the frontier comes out jagged instead of convex.
+        previous: np.ndarray | None = None
         for target in np.linspace(low, high, points):
             constraint = {"type": "eq", "fun": lambda z, t=target: self._expected_return(z) - t}
             try:
@@ -433,10 +442,12 @@ class MeanVarianceOptimizer:
                     lambda z: self._volatility(z) ** 2,
                     extra_constraints=[constraint],
                     context=f"frontier point at return {target:.2%}",
+                    warm_starts=[previous] if previous is not None else None,
                 )
             except OptimizationError:
                 logger.debug("skipping unreachable frontier target %.2f%%", target * 100)
                 continue
+            previous = z
             frontier.append(
                 FrontierPoint(
                     expected_return=self._expected_return(z), volatility=self._volatility(z)

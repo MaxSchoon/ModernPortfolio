@@ -9,8 +9,10 @@ Exit codes: 0 success, 1 portfolio/data error, 2 usage error, 130 interrupted.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -106,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         type=OptimizationMode,
         choices=list(OptimizationMode),
+        metavar="{long-only,long-short,market-neutral}",
         default=OptimizationMode.LONG_ONLY,
         help="portfolio regime: long-only, long-short (shorts allowed with "
         "full use of proceeds), or market-neutral (net exposure 0, gross 1)",
@@ -206,9 +209,12 @@ def print_result(
         ("Expected return", f"{result.expected_return * 100:.2f}%"),
         ("Volatility", f"{result.volatility * 100:.2f}%"),
         ("Sharpe ratio", f"{result.sharpe:.2f}"),
-        ("Net exposure", f"{result.net_exposure * 100:.0f}%"),
-        ("Gross exposure", f"{result.gross_exposure * 100:.0f}%"),
-        ("Long / short", f"{result.long_exposure * 100:.0f}% / {result.short_exposure * 100:.0f}%"),
+        ("Net exposure", f"{result.net_exposure * 100:.1f}%"),
+        ("Gross exposure", f"{result.gross_exposure * 100:.1f}%"),
+        (
+            "Long / short",
+            f"{result.long_exposure * 100:.1f}% / {result.short_exposure * 100:.1f}%",
+        ),
         ("Risk-free rate", f"{risk_free_rate * 100:.2f}%"),
     ]
     for label, value in rows:
@@ -266,11 +272,12 @@ def generate_charts(
     if frontier:
         frontier_path = out / "efficient_frontier.png"
         universe = list(result.tickers)
+        # plot_efficient_frontier expects raw fractions; the summary columns are in %.
         plots.plot_efficient_frontier(
             frontier,
             result,
-            summary.loc[universe, "AnnReturn"],
-            summary.loc[universe, "AnnVolatility"],
+            summary.loc[universe, "AnnReturn"] / 100.0,
+            summary.loc[universe, "AnnVolatility"] / 100.0,
             frontier_path,
         )
         charts["Efficient frontier"] = frontier_path
@@ -291,6 +298,22 @@ def generate_charts(
 
 
 # ---------------------------------------------------------------------- run
+
+
+@contextlib.contextmanager
+def _legacy_output_silenced(quiet: bool):
+    """Suppress raw print() chatter from legacy data modules in quiet mode.
+
+    The fetch/cache layer still prints progress directly; until it is ported
+    to logging, quiet mode redirects its stdout. Errors are unaffected: they
+    surface as exceptions and logging on stderr.
+    """
+    if not quiet:
+        yield
+        return
+    os.environ.setdefault("TQDM_DISABLE", "1")  # progress bars write to stderr
+    with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull):
+        yield
 
 
 def run(args: argparse.Namespace) -> int:
@@ -316,19 +339,20 @@ def run(args: argparse.Namespace) -> int:
         CSVDataCache(str(args.cache_dir)).clear_cache()
         logger.info("cache cleared")
 
-    tickers = load_tickers(str(args.tickers_file))
-    analyzer = PortfolioAnalyzer(
-        tickers,
-        risk_free_rate=args.risk_free,
-        years=args.years,
-        cache_dir=str(args.cache_dir),
-    )
-    analyzer.fetch_data(
-        use_cache=not args.no_cache, batch_size=args.batch_size, max_workers=args.workers
-    )
+    with _legacy_output_silenced(args.quiet):
+        tickers = load_tickers(str(args.tickers_file))
+        analyzer = PortfolioAnalyzer(
+            tickers,
+            risk_free_rate=args.risk_free,
+            years=args.years,
+            cache_dir=str(args.cache_dir),
+        )
+        analyzer.fetch_data(
+            use_cache=not args.no_cache, batch_size=args.batch_size, max_workers=args.workers
+        )
 
-    if not args.no_standardize:
-        standardize_cache_safely(analyzer, args)
+        if not args.no_standardize:
+            standardize_cache_safely(analyzer, args)
 
     analyzer.calculate_returns()
 

@@ -217,6 +217,24 @@ class TestStress:
         returns = [p.expected_return for p in frontier]
         assert min(returns) <= best.expected_return <= max(returns) + 1e-4
 
+    @pytest.mark.parametrize(
+        "mode",
+        [OptimizationMode.LONG_ONLY, OptimizationMode.LONG_SHORT, OptimizationMode.MARKET_NEUTRAL],
+    )
+    def test_frontier_is_not_jagged(self, short_universe, mode):
+        # A mean-variance frontier is convex: sorted by return, volatility may
+        # descend to the minimum-variance point and then ascend — one sign
+        # change. A sawtooth here means individual points converged to
+        # suboptimal solutions (the bug the continuation warm start fixes).
+        mu, cov = short_universe
+        opt = make_optimizer(mu, cov, mode, gross_limit=2.0)
+        frontier = sorted(opt.efficient_frontier(points=20), key=lambda p: p.expected_return)
+        vols = np.array([p.volatility for p in frontier])
+        diffs = np.diff(vols)
+        signs = np.sign(diffs[np.abs(diffs) > 1e-6])
+        sign_changes = int(np.sum(signs[1:] != signs[:-1]))
+        assert sign_changes <= 1, f"jagged frontier: {vols.round(4).tolist()}"
+
     def test_rank_deficient_but_psd_covariance_still_solves(self):
         # Two perfectly correlated assets plus one independent: singular Σ.
         base = np.array([[0.04, 0.04, 0.0], [0.04, 0.04, 0.0], [0.0, 0.0, 0.02]])

@@ -55,6 +55,13 @@ def plot_allocation(weights: dict[str, float], mode: str, path: Path | str) -> N
         ax.set_title(f"Allocation ({mode})")
         ax.xaxis.set_major_formatter(PercentFormatter(xmax=100))
         _annotate_bars(ax, y_positions, values)
+        # Leave headroom on both sides so the outside-the-bar value labels
+        # are never clipped at the figure edge.
+        headroom = 0.20 * float(np.max(np.abs(values)))
+        ax.set_xlim(
+            min(0.0, float(values.min())) - headroom,
+            max(0.0, float(values.max())) + headroom,
+        )
         _style_axes(ax)
         fig.tight_layout()
         _save_figure(fig, path)
@@ -77,7 +84,10 @@ def plot_efficient_frontier(
     optimal_return = _valid_finite_number(optimal.expected_return, "optimal expected return")
     optimal_volatility = _valid_positive_number(optimal.volatility, "optimal volatility")
 
-    frontier_points.sort(key=lambda point: point[1])
+    # Sort by return, not volatility: the frontier is a function of return
+    # (one volatility per target return), while sorting by volatility
+    # interleaves the upper and lower branches and draws a sawtooth.
+    frontier_points.sort(key=lambda point: point[0])
     frontier_returns = np.array([point[0] for point in frontier_points], dtype=float) * 100.0
     frontier_vols = np.array([point[1] for point in frontier_points], dtype=float) * 100.0
 
