@@ -14,6 +14,7 @@ All functions work with the standard CSVDataCache from csv_cache_manager.py
 import argparse
 import concurrent.futures
 import glob
+import logging
 import os
 import shutil
 import sys
@@ -50,6 +51,15 @@ from src.utils.utils import (
 
 # Default cache directory
 DEFAULT_CACHE_DIR = "data_cache"
+logger = logging.getLogger(__name__)
+
+
+def _drop_timezone(index: pd.Index) -> pd.Index:
+    """Return a timezone-naive index without failing on already-naive indexes."""
+    if getattr(index, "tz", None) is not None:
+        return index.tz_localize(None)
+    return index
+
 
 # ==============================================================================
 # TICKER VALIDATION FUNCTIONS
@@ -185,6 +195,7 @@ def validate_csv_tickers(filepath: str, output_filepath: str = None) -> None:
         print_success(f"Saved corrected tickers to {output_filepath}")
 
     except Exception as e:
+        logger.exception("Error processing ticker CSV file %s", filepath)
         print_error(f"Error processing CSV file: {str(e)}")
 
 
@@ -336,6 +347,7 @@ def check_all_tickers_data_quality(cache_dir: str = DEFAULT_CACHE_DIR) -> None:
                 good_tickers.append(ticker)
 
         except Exception as e:
+            logger.warning("Error checking data quality for %s", ticker, exc_info=True)
             bad_tickers.append((ticker, f"Error: {str(e)}"))
 
     print("\n")  # Clear the line after progress updates
@@ -408,6 +420,7 @@ def plot_ticker(ticker: str, cache_dir: str = DEFAULT_CACHE_DIR) -> None:
     except ImportError:
         print_error("Matplotlib not installed. Install it with 'pip install matplotlib'")
     except Exception as e:
+        logger.exception("Error plotting cached data for %s", ticker)
         print_error(f"Error plotting data: {str(e)}")
 
 
@@ -459,6 +472,7 @@ def inspect_csv_file(filepath: str) -> pd.DataFrame:
 
         return df
     except Exception as e:
+        logger.exception("Error inspecting CSV file %s", filepath)
         print_error(f"Error inspecting file: {type(e).__name__}: {str(e)}")
         return None
 
@@ -483,7 +497,7 @@ def fix_csv_file(filepath: str, output_filepath: str = None) -> bool:
         # Convert date strings to datetime objects
         try:
             df[date_col] = pd.to_datetime(df[date_col])
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             print_warning(f"Error converting dates: {type(e).__name__}: {str(e)}")
             print_info("Attempting to fix date format...")
 
@@ -494,7 +508,7 @@ def fix_csv_file(filepath: str, output_filepath: str = None) -> bool:
                     if not df[date_col].isna().all():
                         print_success(f"Successfully parsed dates using format: {date_format}")
                         break
-                except:
+                except (ValueError, TypeError):
                     continue
 
         # Set the date column as index
@@ -554,6 +568,7 @@ def fix_csv_file(filepath: str, output_filepath: str = None) -> bool:
         print_success(f"File fixed and saved to {output_filepath}")
         return True
     except Exception as e:
+        logger.exception("Error fixing CSV file %s", filepath)
         print_error(f"Error fixing file: {type(e).__name__}: {str(e)}")
         return False
 
@@ -632,14 +647,14 @@ def test_and_repair_cached_data(
                         new_prices = stock.history(start=start_date, end=end_date)["Close"]
 
                         if len(new_prices) > 10:  # We got some data
-                            new_prices.index = new_prices.index.tz_localize(None)
+                            new_prices.index = _drop_timezone(new_prices.index)
                             cache.save_price_data(ticker, new_prices)
 
                             # Also try to get dividends
                             try:
                                 dividends = stock.dividends
                                 if not dividends.empty:
-                                    dividends.index = dividends.index.tz_localize(None)
+                                    dividends.index = _drop_timezone(dividends.index)
                                     div_series = pd.Series(0.0, index=new_prices.index)
                                     common_dates = dividends.index.intersection(div_series.index)
 
@@ -650,6 +665,11 @@ def test_and_repair_cached_data(
 
                                     cache.save_div_data(ticker, div_series)
                             except Exception as e:
+                                logger.warning(
+                                    "Couldn't save dividend data while repairing %s",
+                                    ticker,
+                                    exc_info=True,
+                                )
                                 print_error(f"Couldn't save dividend data for {ticker}: {e}")
 
                             repaired_tickers.append(ticker)
@@ -660,6 +680,7 @@ def test_and_repair_cached_data(
                             print_error(f"Failed to repair {ticker} - insufficient data")
 
                     except Exception as e:
+                        logger.warning("Error repairing %s", ticker, exc_info=True)
                         print_error(f"Error repairing {ticker}: {e}")
 
                 else:  # Minor issues - just clean up
@@ -669,6 +690,7 @@ def test_and_repair_cached_data(
                         repaired_tickers.append(ticker)
                         print_success(f"\nFixed {ticker} by filling {nan_count} NaN values")
                     except Exception as e:
+                        logger.warning("Error fixing NaN values for %s", ticker, exc_info=True)
                         print_error(f"\nError fixing {ticker}: {e}")
 
             bad_tickers.append((ticker, f"{nan_pct:.1f}% NaN"))
@@ -759,6 +781,7 @@ def convert_pickle_to_csv(old_cache_dir: str, new_cache_dir: str = DEFAULT_CACHE
                     print_warning(f"{ticker}: Unexpected data format")
 
             except Exception as e:
+                logger.warning("Error converting pickle cache for %s", ticker, exc_info=True)
                 print_error(f"Error converting {ticker}: {str(e)}")
 
         if converted_count > 0:
@@ -781,6 +804,7 @@ def convert_pickle_to_csv(old_cache_dir: str, new_cache_dir: str = DEFAULT_CACHE
     except ImportError:
         print_error("Pickle module not available")
     except Exception as e:
+        logger.exception("Error during pickle cache conversion from %s", old_cache_dir)
         print_error(f"Error during conversion: {str(e)}")
 
 
@@ -855,6 +879,7 @@ def batch_validate_and_fix(cache_dir: str = DEFAULT_CACHE_DIR, parallel: bool = 
                 result["message"] = "No issues found"
 
         except Exception as e:
+            logger.warning("Error processing cached ticker %s", ticker, exc_info=True)
             result["status"] = "error"
             result["message"] = str(e)
 
@@ -878,6 +903,7 @@ def batch_validate_and_fix(cache_dir: str = DEFAULT_CACHE_DIR, parallel: bool = 
                         result = future.result()
                         results.append(result)
                     except Exception as e:
+                        logger.warning("Thread error while processing %s", ticker, exc_info=True)
                         results.append(
                             {
                                 "ticker": ticker,
@@ -1042,6 +1068,7 @@ if __name__ == "__main__":
         print_error("Operation cancelled by user")
         sys.exit(1)
     except Exception as e:
+        logger.exception("Unexpected error during cache maintenance")
         print_error(f"Unexpected error: {str(e)}")
         if "--debug" in sys.argv:
             import traceback

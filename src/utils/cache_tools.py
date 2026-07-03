@@ -10,6 +10,7 @@ For more advanced maintenance, use cache_maintenance.py
 """
 
 import glob
+import logging
 import os
 import sys
 
@@ -23,6 +24,7 @@ from src.utils.utils import (
 
 # Default cache directory - consistent with ModernPortfolio.py
 DEFAULT_CACHE_DIR = "data_cache"
+logger = logging.getLogger(__name__)
 
 
 def list_cached_tickers(cache_dir: str = DEFAULT_CACHE_DIR) -> None:
@@ -143,6 +145,7 @@ def fix_nan_issues(ticker: str, cache_dir: str = DEFAULT_CACHE_DIR) -> bool:
         return True
 
     except Exception as e:
+        logger.exception("Error fixing NaN values for %s", ticker)
         print_error(f"Error fixing {ticker}: {str(e)}")
         return False
 
@@ -202,6 +205,7 @@ def validate_cached_ticker(
         return True
 
     except Exception as e:
+        logger.exception("Error validating cached ticker %s", ticker)
         if verbose:
             print_error(f"Error validating {ticker}: {str(e)}")
         return False

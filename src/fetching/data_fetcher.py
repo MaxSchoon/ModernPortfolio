@@ -8,6 +8,7 @@ to provide a unified interface for obtaining financial data.
 import argparse
 import concurrent.futures
 import itertools
+import logging
 import os
 import sys
 import time
@@ -21,6 +22,8 @@ from tqdm import tqdm  # For progress bars
 
 from src.cache.csv_cache_manager import CSVDataCache
 from src.utils.utils import format_ticker, load_tickers, validate_prices, validate_ticker
+
+logger = logging.getLogger(__name__)
 
 # Initialize colorama for colored terminal output
 colorama.init()
@@ -185,6 +188,7 @@ class DataFetcher:
                     f"✅ {ticker}: Special asset, using synthetic data ({len(synthetic_data)} points)",
                 )
             except Exception as e:
+                logger.warning("Error generating synthetic data for %s", ticker, exc_info=True)
                 return False, f"❌ {ticker}: Error generating synthetic data - {str(e)}"
 
         # Check cache first if enabled
@@ -194,8 +198,10 @@ class DataFetcher:
                 # Extra check for data quality - ensure we're not using bad cached data
                 nan_pct = cached_data.isna().mean() * 100
                 if nan_pct > 50:  # If more than 50% is NaN, consider it bad data
-                    print(
-                        f"{Fore.YELLOW}⚠️ {ticker}: Cached data has {nan_pct:.1f}% NaN values - will fetch fresh data{Style.RESET_ALL}"
+                    logger.warning(
+                        "%s: Cached data has %.1f%% NaN values - will fetch fresh data",
+                        ticker,
+                        nan_pct,
                     )
                 else:
                     self.cached_count += 1
@@ -230,7 +236,7 @@ class DataFetcher:
 
                 except Exception:
                     # Continue anyway - info isn't critical
-                    pass
+                    logger.debug("Failed to fetch stock info for %s", ticker, exc_info=True)
 
                 # Get price data
                 prices = stock.history(start=start_date, end=end_date)["Close"]
@@ -243,7 +249,8 @@ class DataFetcher:
                     return False, f"❌ {ticker}: Insufficient price data ({len(prices)} days)"
 
                 # Normalize and clean data
-                prices.index = prices.index.tz_localize(None)
+                if prices.index.tz is not None:
+                    prices.index = prices.index.tz_localize(None)
 
                 # Check data quality
                 validation = validate_prices(prices)
@@ -261,7 +268,8 @@ class DataFetcher:
                 try:
                     dividends = stock.dividends
                     if not dividends.empty:
-                        dividends.index = dividends.index.tz_localize(None)
+                        if dividends.index.tz is not None:
+                            dividends.index = dividends.index.tz_localize(None)
                         div_series = pd.Series(0.0, index=prices.index, dtype="float64")
                         common_dates = dividends.index.intersection(div_series.index)
 
@@ -288,6 +296,7 @@ class DataFetcher:
 
                 except Exception as e:
                     # If dividend fetching fails, we can still use the price data
+                    logger.warning("Error fetching dividend data for %s", ticker, exc_info=True)
                     div_series = pd.Series(0.0, index=prices.index, dtype="float64")
                     self.cache.save_div_data(ticker, div_series)
 
@@ -298,6 +307,13 @@ class DataFetcher:
                     )
 
             except Exception as e:
+                logger.warning(
+                    "Error fetching %s on attempt %s/%s",
+                    ticker,
+                    attempt + 1,
+                    self.retry_count,
+                    exc_info=True,
+                )
                 if attempt < self.retry_count - 1:
                     delay = 2  # Simple retry delay
                     time.sleep(delay)
@@ -379,6 +395,11 @@ class DataFetcher:
                             progress_bar.update(1)
 
                         except Exception as e:
+                            logger.warning(
+                                "Unhandled thread error while fetching %s",
+                                ticker,
+                                exc_info=True,
+                            )
                             results[ticker] = f"❌ {ticker}: Error in thread: {str(e)}"
                             progress_bar.update(1)
 
@@ -549,6 +570,7 @@ class DataFetcher:
             print(f"Updated {updated_count} ticker symbols{Style.RESET_ALL}")
 
         except Exception as e:
+            logger.exception("Error processing CSV file %s", filepath)
             print(f"{Fore.RED}❌ Error processing CSV file: {str(e)}{Style.RESET_ALL}")
 
 

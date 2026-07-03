@@ -4,11 +4,14 @@ Utility functions for Modern Portfolio Optimizer
 This module contains common helper functions used across different scripts.
 """
 
+import logging
 import os
 import re
 from typing import Any
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def load_tickers(csv_path: str) -> list[str]:
@@ -25,20 +28,20 @@ def load_tickers(csv_path: str) -> list[str]:
         raise FileNotFoundError(f"Tickers file not found: {csv_path}")
 
     try:
-        print(f"Reading ticker data from: {csv_path}")
+        logger.info("Reading ticker data from: %s", csv_path)
 
         # Try to detect delimiter
         with open(csv_path) as f:
             first_line = f.readline().strip()
             if ";" in first_line:
                 delimiter = ";"
-                print("Detected semicolon delimiter")
+                logger.debug("Detected semicolon delimiter")
             elif "," in first_line:
                 delimiter = ","
-                print("Detected comma delimiter")
+                logger.debug("Detected comma delimiter")
             else:
                 delimiter = ";"  # Default
-                print("Using default semicolon delimiter")
+                logger.debug("Using default semicolon delimiter")
 
         df = pd.read_csv(csv_path, sep=delimiter)
 
@@ -50,19 +53,19 @@ def load_tickers(csv_path: str) -> list[str]:
                 break
 
         if ticker_column is None:
-            print(f"Columns in CSV: {', '.join(df.columns)}")
+            logger.warning("Columns in CSV: %s", ", ".join(df.columns))
             raise ValueError("CSV file must contain a 'ticker' column")
 
         tickers = df[ticker_column].tolist()
-        print(f"Found {len(tickers)} tickers in the CSV file")
+        logger.info("Found %s tickers in the CSV file", len(tickers))
 
         # Print first few tickers
         sample = tickers[: min(5, len(tickers))]
-        print(f"Sample tickers: {', '.join(sample)}")
+        logger.debug("Sample tickers: %s", ", ".join(sample))
 
         return tickers
-    except Exception as e:
-        print(f"Error reading tickers file: {str(e)}")
+    except Exception:
+        logger.exception("Error reading tickers file %s", csv_path)
         raise
 
 
@@ -210,11 +213,11 @@ def validate_ticker(ticker: str, verbose: bool = True) -> tuple[bool, str, str]:
         ]
         if suffix not in valid_suffixes:
             if verbose:
-                print(f"Warning: '{ticker}' has unknown exchange suffix '{suffix}'")
+                logger.warning("Ticker %s has unknown exchange suffix %s", ticker, suffix)
 
     if verbose:
         if ticker != corrected:
-            print(f"Corrected '{ticker}' to '{corrected}'")
+            logger.info("Corrected ticker %s to %s", ticker, corrected)
 
     return True, corrected, "Valid ticker"
 
@@ -329,11 +332,11 @@ def log_progress(message: str, title: bool = False, error: bool = False) -> None
         error: If True, formats as an error message
     """
     if title:
-        print(f"\n{'=' * 10} {message} {'=' * 10}")
+        logger.info("========== %s ==========", message)
     elif error:
-        print(f"❌ {message}")
+        logger.error(message)
     else:
-        print(f"- {message}")
+        logger.info(message)
 
 
 ###############################################################################

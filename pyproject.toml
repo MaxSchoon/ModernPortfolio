@@ -27,11 +27,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Legacy data-plumbing modules scheduled for their own cleanup pass; see
-# CONTRIBUTING.md. New code (core, reporting, CLI, tests) gets no exemptions.
-"src/cache/*" = ["B", "SIM", "E722"]
-"src/fetching/*" = ["B", "SIM", "E722"]
-"src/utils/*" = ["B", "SIM", "E722"]
+# Legacy data-plumbing modules keep two stylistic exemptions (bugbear,
+# simplify) pending a deeper refactor; error-handling rules apply everywhere.
+# New code (core, reporting, CLI, tests) gets no exemptions.
+"src/cache/*" = ["B", "SIM"]
+"src/fetching/*" = ["B", "SIM"]
+"src/utils/*" = ["B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

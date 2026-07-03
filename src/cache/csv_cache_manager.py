@@ -7,12 +7,15 @@ It handles both regular ticker data and synthetic assets like cash and T-bills.
 
 import glob
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class CSVDataCache:
@@ -75,8 +78,13 @@ class CSVDataCache:
                     df = pd.read_csv(cache_file, index_col=0)
                     df.index = pd.to_datetime(df.index)
                     return df["Close"]
-                except Exception as e:
-                    print(f"Error loading cached price data for {ticker}: {str(e)}")
+                except (KeyError, OSError, ValueError):
+                    logger.warning(
+                        "Error loading cached price data for %s from %s",
+                        ticker,
+                        cache_file,
+                        exc_info=True,
+                    )
 
         # If we get here, either the file doesn't exist, is too old, or couldn't be loaded
         return None
@@ -112,8 +120,13 @@ class CSVDataCache:
                     df = pd.read_csv(cache_file, index_col=0)
                     df.index = pd.to_datetime(df.index)
                     return df["Dividend"]
-                except Exception as e:
-                    print(f"Error loading cached dividend data for {ticker}: {str(e)}")
+                except (KeyError, OSError, ValueError):
+                    logger.warning(
+                        "Error loading cached dividend data for %s from %s",
+                        ticker,
+                        cache_file,
+                        exc_info=True,
+                    )
 
         # If we get here, either the file doesn't exist, is too old, or couldn't be loaded
         return None
@@ -143,8 +156,8 @@ class CSVDataCache:
             self._update_metadata(ticker, "price", len(price_data))
 
             return True
-        except Exception as e:
-            print(f"Error saving price data for {ticker}: {str(e)}")
+        except (OSError, ValueError):
+            logger.warning("Error saving price data for %s", ticker, exc_info=True)
             return False
 
     def save_div_data(self, ticker: str, div_data: pd.Series) -> bool:
@@ -172,8 +185,8 @@ class CSVDataCache:
             self._update_metadata(ticker, "dividend", len(div_data))
 
             return True
-        except Exception as e:
-            print(f"Error saving dividend data for {ticker}: {str(e)}")
+        except (OSError, ValueError):
+            logger.warning("Error saving dividend data for %s", ticker, exc_info=True)
             return False
 
     def save_info_data(self, ticker: str, info_data: dict[str, Any]) -> bool:
@@ -199,7 +212,8 @@ class CSVDataCache:
                     filtered_info[key] = value
                 except (TypeError, OverflowError):
                     # Skip non-serializable values
-                    pass
+                    logger.debug("Skipping non-serializable info field %s for %s", key, ticker)
+                    continue
 
             # Save to file
             with open(info_file, "w") as f:
@@ -209,8 +223,8 @@ class CSVDataCache:
             self._update_metadata(ticker, "info", len(filtered_info))
 
             return True
-        except Exception as e:
-            print(f"Error saving info data for {ticker}: {str(e)}")
+        except (OSError, TypeError, OverflowError):
+            logger.warning("Error saving info data for %s", ticker, exc_info=True)
             return False
 
     def _get_synthetic_asset_data(self, ticker: str, years: int = 5) -> pd.Series:
@@ -252,8 +266,8 @@ class CSVDataCache:
 
                 return df["Close"]
 
-            except Exception as e:
-                print(f"Error loading synthetic data for {ticker}: {str(e)}")
+            except (KeyError, OSError, ValueError):
+                logger.warning("Error loading synthetic data for %s", ticker, exc_info=True)
                 # Fall back to generating new data
 
         # If we get here, either the file doesn't exist, couldn't be loaded,
@@ -305,11 +319,12 @@ class CSVDataCache:
         # Generate prices with compounding returns
         days = len(date_range)
         prices = np.ones(days)
+        rng = np.random.default_rng(42)
 
         # Apply compounding with tiny random noise
         for i in range(1, days):
             # Add a small amount of noise to simulate minor fluctuations
-            daily_noise = np.random.normal(0, np.sqrt(variance))
+            daily_noise = rng.normal(0, np.sqrt(variance))
             prices[i] = prices[i - 1] * (1 + daily_return + daily_noise)
 
         # Create a pandas series with the generated prices
@@ -324,7 +339,8 @@ class CSVDataCache:
             try:
                 with open(meta_file) as f:
                     metadata = json.load(f)
-            except:
+            except (OSError, json.JSONDecodeError):
+                logger.warning("Error reading metadata for %s", ticker, exc_info=True)
                 metadata = {}
         else:
             metadata = {}
@@ -337,8 +353,8 @@ class CSVDataCache:
         try:
             with open(meta_file, "w") as f:
                 json.dump(metadata, f, indent=2)
-        except Exception as e:
-            print(f"Error updating metadata for {ticker}: {str(e)}")
+        except (OSError, TypeError, OverflowError):
+            logger.warning("Error updating metadata for %s", ticker, exc_info=True)
 
     def get_cache_status(self) -> dict[str, Any]:
         """Get status information about the cache"""
@@ -358,7 +374,8 @@ class CSVDataCache:
             try:
                 mtime = os.path.getmtime(file)
                 dates.append(datetime.fromtimestamp(mtime))
-            except:
+            except OSError:
+                logger.warning("Error reading mtime for cache file %s", file, exc_info=True)
                 continue
 
         oldest = min(dates) if dates else None
@@ -384,10 +401,12 @@ class CSVDataCache:
         for file in price_files + div_files + meta_files:
             try:
                 os.remove(file)
-            except Exception as e:
-                print(f"Error deleting {file}: {str(e)}")
+            except OSError:
+                logger.warning("Error deleting cache file %s", file, exc_info=True)
 
-        print(f"Cache cleared: {len(price_files)} price files, {len(div_files)} dividend files")
+        logger.info(
+            "Cache cleared: %s price files, %s dividend files", len(price_files), len(div_files)
+        )
 
 
 # Usage example (if run directly)

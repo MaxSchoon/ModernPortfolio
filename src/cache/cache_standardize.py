@@ -7,12 +7,15 @@ consistent parsing and alignment across different tickers.
 
 import argparse
 import glob
+import logging
 import os
 import sys
 from datetime import datetime
 from typing import Any
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:
     from colorama import Fore, Style, init
@@ -48,6 +51,20 @@ except ImportError:
         print(f"ERROR: {msg}")
 
 
+def write_progress(message: str) -> None:
+    """Write progress on one terminal line, or one line per update when captured."""
+    if sys.stdout.isatty():
+        sys.stdout.write(f"\r{message}")
+        sys.stdout.flush()
+    else:
+        print(message)
+
+
+def finish_progress() -> None:
+    if sys.stdout.isatty():
+        print()
+
+
 def scan_cache_directory(cache_dir: str) -> dict[str, list[str]]:
     """
     Scan cache directory for CSV files
@@ -77,8 +94,7 @@ def analyze_date_formats(files: list[str]) -> dict[str, Any]:
 
     for i, file in enumerate(files):
         ticker = os.path.basename(file).split("_")[0]
-        sys.stdout.write(f"\rAnalyzing file {i + 1}/{total_files}: {ticker}")
-        sys.stdout.flush()
+        write_progress(f"Analyzing file {i + 1}/{total_files}: {ticker}")
 
         try:
             # Read first few rows to analyze date format
@@ -96,14 +112,14 @@ def analyze_date_formats(files: list[str]) -> dict[str, Any]:
             try:
                 pd.to_datetime(first_date)  # Try pandas automatic parsing
                 date_format = "auto-detect"
-            except:
+            except (ValueError, TypeError):
                 # Try some common formats
                 for fmt in ["%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]:
                     try:
                         datetime.strptime(str(first_date), fmt)
                         date_format = fmt
                         break
-                    except:
+                    except (ValueError, TypeError):
                         continue
 
             if date_format:
@@ -112,9 +128,10 @@ def analyze_date_formats(files: list[str]) -> dict[str, Any]:
                 issues.append(f"{ticker}: Could not determine date format for '{first_date}'")
 
         except Exception as e:
+            logger.warning("Error analyzing date format for %s", ticker, exc_info=True)
             issues.append(f"{ticker}: Error - {str(e)}")
 
-    print()  # New line after progress indicator
+    finish_progress()
 
     return {"formats": formats, "issues": issues}
 
@@ -173,10 +190,12 @@ def standardize_csv_file(file_path: str, date_format: str = "ISO") -> bool:
             return True
 
         except Exception as e:
+            logger.warning("Failed to convert dates for %s", ticker, exc_info=True)
             print_error(f"{ticker}: Failed to convert dates - {str(e)}")
             return False
 
     except Exception as e:
+        logger.warning("Error processing cache file %s", file_path, exc_info=True)
         print_error(f"{ticker}: Error processing file - {str(e)}")
         return False
 
@@ -220,6 +239,7 @@ def remove_future_dates(file_path: str) -> int:
         return future_count
 
     except Exception as e:
+        logger.warning("Error removing future dates from %s", file_path, exc_info=True)
         print_error(f"{ticker}: Error removing future dates - {str(e)}")
         return 0
 
@@ -283,8 +303,7 @@ def standardize_cache(cache_dir: str, remove_future: bool = True) -> dict[str, A
     print_info("\nStandardizing price files...")
     for i, file in enumerate(price_files):
         ticker = os.path.basename(file).split("_")[0]
-        sys.stdout.write(f"\rProcessing {i + 1}/{len(price_files)}: {ticker}")
-        sys.stdout.flush()
+        write_progress(f"Processing {i + 1}/{len(price_files)}: {ticker}")
 
         if standardize_csv_file(file):
             stats["price_processed"] += 1
@@ -296,14 +315,13 @@ def standardize_cache(cache_dir: str, remove_future: bool = True) -> dict[str, A
         else:
             stats["price_errors"] += 1
 
-    print()  # New line after progress indicator
+    finish_progress()
 
     # Process dividend files
     print_info("\nStandardizing dividend files...")
     for i, file in enumerate(div_files):
         ticker = os.path.basename(file).split("_")[0]
-        sys.stdout.write(f"\rProcessing {i + 1}/{len(div_files)}: {ticker}")
-        sys.stdout.flush()
+        write_progress(f"Processing {i + 1}/{len(div_files)}: {ticker}")
 
         if standardize_csv_file(file):
             stats["div_processed"] += 1
@@ -315,7 +333,7 @@ def standardize_cache(cache_dir: str, remove_future: bool = True) -> dict[str, A
         else:
             stats["div_errors"] += 1
 
-    print()  # New line after progress indicator
+    finish_progress()
 
     # Print summary
     print_info("\n" + "=" * 50)
@@ -402,6 +420,7 @@ def verify_cache_alignment(cache_dir: str, sample_count: int = 5) -> bool:
                 print(f"{ticker}: {start_date.date()} to {end_date.date()} ({len(df)} days)")
 
         except Exception as e:
+            logger.warning("Error verifying cache alignment for %s", ticker, exc_info=True)
             print_error(f"{ticker}: Error - {str(e)}")
 
     # Check for alignment issues
@@ -465,5 +484,6 @@ if __name__ == "__main__":
         print_error("\nOperation cancelled by user")
         sys.exit(1)
     except Exception as e:
+        logger.exception("Unexpected error during cache standardization")
         print_error(f"Unexpected error: {str(e)}")
         sys.exit(1)
