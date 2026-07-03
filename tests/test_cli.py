@@ -43,6 +43,15 @@ class TestParser:
         with pytest.raises(SystemExit):
             build_parser().parse_args(["--quiet", "--debug"])
 
+    def test_optimizer_flag_parses(self):
+        assert build_parser().parse_args([]).optimizer == "mean-variance"
+        assert build_parser().parse_args(["--optimizer", "hrp"]).optimizer == "hrp"
+
+    def test_rejects_unknown_optimizer(self):
+        with pytest.raises(SystemExit) as excinfo:
+            build_parser().parse_args(["--optimizer", "genetic"])
+        assert excinfo.value.code == EXIT_USAGE
+
 
 class TestMain:
     def test_missing_tickers_file_exits_with_error_not_traceback(self, tmp_path, capsys):
@@ -73,3 +82,26 @@ class TestMain:
         )
         assert code == EXIT_ERROR
         assert "gross_limit" in capsys.readouterr().err
+
+    def test_hrp_with_shorts_mode_is_a_clean_error_before_any_fetch(self, tmp_path, capsys):
+        tickers = tmp_path / "tickers.csv"
+        tickers.write_text("ticker\nAAA\n")
+        code = main(
+            [
+                "--tickers-file",
+                str(tickers),
+                "--optimizer",
+                "hrp",
+                "--mode",
+                "long-short",
+                "--quiet",
+                "--cache-dir",
+                str(tmp_path / "cache"),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
+        assert code == EXIT_ERROR
+        err = capsys.readouterr().err
+        assert "long-only" in err
+        assert "Traceback" not in err

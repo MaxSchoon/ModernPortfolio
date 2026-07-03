@@ -8,6 +8,9 @@ Modern Portfolio Optimizer is an experimental and educational Modern Portfolio T
   - `long-only`: classic Markowitz constraints with `w_i >= 0` and `sum(w) = 1`.
   - `long-short`: shorts allowed with full use of proceeds, `sum(w) = 1`, and a gross-exposure cap `sum(abs(w)) <= gross_limit`. A gross limit of `1.6` corresponds to a 130/30 fund, while `2.0` corresponds to Reg-T-style 2x gross exposure.
   - `market-neutral`: dollar-neutral portfolio with net exposure `0` and normalized gross exposure `1`.
+- Two allocation methods:
+  - `mean-variance` (default): numerical max-Sharpe with verified constraints.
+  - `hrp`: Hierarchical Risk Parity (Lopez de Prado, 2016) — clusters assets by correlation distance and splits capital by inverse cluster variance. Uses no return forecasts and no covariance inversion, so it stays stable where mean-variance estimates are noisy and even works on singular covariance matrices. Long-only by construction.
 - Short borrow costs through `--borrow-rate`, charged against short notional.
 - Kelly leverage suggestion using expected return, volatility, risk-free rate, and margin borrow cost.
 - Typed core errors: `ConfigurationError`, `DataValidationError`, and `OptimizationError`.
@@ -92,6 +95,7 @@ Global options:
 
 | Flag | Default | Description |
 |---|---:|---|
+| `--optimizer {mean-variance,hrp}` | `mean-variance` | Allocation method: numerical max-Sharpe, or Hierarchical Risk Parity (long-only, forecast-free). |
 | `--mode {long-only,long-short,market-neutral}` | `long-only` | Portfolio regime. |
 | `--risk-free RATE` | `0.04` | Annual risk-free rate. |
 | `--margin-cost RATE` | `0.065` | Annual margin borrow rate used in Kelly leverage. |

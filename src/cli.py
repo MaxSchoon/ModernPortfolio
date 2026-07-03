@@ -105,6 +105,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     strategy = parser.add_argument_group("strategy")
     strategy.add_argument(
+        "--optimizer",
+        choices=["mean-variance", "hrp"],
+        default="mean-variance",
+        help="allocation method: mean-variance (max Sharpe, supports all modes) "
+        "or hrp (Hierarchical Risk Parity — clustering-based, uses no return "
+        "forecasts, long-only by construction)",
+    )
+    strategy.add_argument(
         "--mode",
         type=OptimizationMode,
         choices=list(OptimizationMode),
@@ -213,7 +221,8 @@ def print_result(
         ("Gross exposure", f"{result.gross_exposure * 100:.1f}%"),
         (
             "Long / short",
-            f"{result.long_exposure * 100:.1f}% / {result.short_exposure * 100:.1f}%",
+            f"{round(result.long_exposure * 100, 1) + 0.0:.1f}% / "
+            f"{round(result.short_exposure * 100, 1) + 0.0:.1f}%",
         ),
         ("Risk-free rate", f"{risk_free_rate * 100:.2f}%"),
     ]
@@ -328,6 +337,12 @@ def run(args: argparse.Namespace) -> int:
         raise ConfigurationError(
             f"--frontier-points must be at least 2, got {args.frontier_points}"
         )
+    if args.optimizer == "hrp" and args.mode is not OptimizationMode.LONG_ONLY:
+        raise ConfigurationError(
+            "HRP is long-only by construction (its recursive bisection only splits "
+            f"capital, never signs it); --mode {args.mode.value} requires "
+            "--optimizer mean-variance"
+        )
     config = OptimizerConfig(
         mode=args.mode,
         risk_free_rate=args.risk_free,
@@ -361,7 +376,16 @@ def run(args: argparse.Namespace) -> int:
     analyzer.calculate_returns()
 
     optimizer = analyzer.build_optimizer(config, exclude_cash=args.exclude_cash)
-    result = optimizer.max_sharpe()
+    if args.optimizer == "hrp":
+        from src.core.hrp import HRPOptimizer
+
+        # Reuse the mean-variance engine's validated universe and covariance;
+        # the engine itself still provides the efficient frontier for context.
+        result = HRPOptimizer(
+            optimizer.tickers, optimizer.mean_returns, optimizer.cov_matrix, args.risk_free
+        ).allocate()
+    else:
+        result = optimizer.max_sharpe()
     kelly = kelly_metrics(
         result.expected_return,
         result.volatility,
@@ -394,6 +418,7 @@ def run(args: argparse.Namespace) -> int:
             returns_summary=analyzer.returns_summary,
             frontier=frontier,
             run_config={
+                "Optimizer": args.optimizer,
                 "Mode": args.mode.value,
                 "Years of history": args.years,
                 "Risk-free rate": f"{args.risk_free:.2%}",
