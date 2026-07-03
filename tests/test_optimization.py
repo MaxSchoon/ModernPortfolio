@@ -75,11 +75,19 @@ class TestAnalyticGroundTruth:
         ).max_sharpe()
         assert result.sharpe == pytest.approx(sharpe_of(analytic, mu, cov), abs=1e-4)
 
-    def test_tangency_undefined_when_net_is_zero(self):
+    def test_tangency_rejected_when_net_is_zero(self):
         # Symmetric universe: excess returns sum to zero under Σ⁻¹.
         mu = np.array([RF + 0.05, RF - 0.05])
         cov = np.diag([0.04, 0.04])
-        with pytest.raises(OptimizationError, match="undefined"):
+        with pytest.raises(OptimizationError, match="does not exist"):
+            tangency_portfolio(mu, cov, RF)
+
+    def test_tangency_rejected_when_everything_trails_risk_free(self):
+        # All-bearish universe: dividing by the negative normalizer would
+        # silently flip every sign and fabricate a plausible-looking portfolio.
+        mu = np.array([RF - 0.03, RF - 0.05])
+        cov = np.diag([0.04, 0.04])
+        with pytest.raises(OptimizationError, match="does not exist"):
             tangency_portfolio(mu, cov, RF)
 
 
@@ -171,6 +179,38 @@ class TestMarketNeutral:
             return
         assert abs(result.sharpe) < 1e-6
         assert result.net_exposure == pytest.approx(0.0, abs=1e-4)
+
+    def test_tight_caps_never_breached_by_gross_normalization(self):
+        # Regression: gross used to be rescaled to 1 after the solve, which
+        # could push weights past their per-asset caps. Caps win; gross may
+        # stay below 1 but must be reported exactly, and the result must be
+        # at least as good (risk-adjusted) as an obvious feasible candidate.
+        mu = np.array([0.12, 0.08, -0.02, -0.06])
+        cov = np.diag([0.04, 0.04, 0.04, 0.04])
+        result = make_optimizer(
+            list(mu), cov, OptimizationMode.MARKET_NEUTRAL, max_weight=0.3, max_short=0.3
+        ).max_sharpe()
+        assert (result.weights <= 0.3 + TOL).all()
+        assert (result.weights >= -0.3 - TOL).all()
+        assert result.net_exposure == pytest.approx(0.0, abs=1e-4)
+        assert result.gross_exposure <= 1.0 + TOL
+        # Feasible hand-built candidate: flat unit-gross long/short split.
+        candidate = np.array([0.3, 0.2, -0.2, -0.3])
+        candidate_sharpe = (candidate @ mu) / np.sqrt(candidate @ cov @ candidate)
+        assert result.sharpe >= candidate_sharpe - 1e-6
+
+    def test_two_asset_tight_caps_reach_the_cap_bound(self):
+        # Two assets capped at 0.3/0.3 can reach at most 0.6 gross while
+        # dollar-neutral; the optimizer must deliver exactly that, not
+        # fabricate unit gross by breaching the caps.
+        mu = [0.12, -0.02]
+        cov = np.diag([0.04, 0.04])
+        result = make_optimizer(
+            mu, cov, OptimizationMode.MARKET_NEUTRAL, max_weight=0.3, max_short=0.3
+        ).max_sharpe()
+        assert result.weights[0] == pytest.approx(0.3, abs=1e-4)
+        assert result.weights[1] == pytest.approx(-0.3, abs=1e-4)
+        assert result.gross_exposure == pytest.approx(0.6, abs=1e-4)
 
     def test_min_volatility_is_rejected_as_degenerate(self, short_universe):
         mu, cov = short_universe
@@ -301,11 +341,20 @@ class TestValidation:
 
 class TestKelly:
     def test_matches_hand_computed_leverage(self):
-        # kelly = (0.10 - 0.06) / 0.2² = 1.0 → no borrowing, no idle cash.
+        # Unlevered optimum (0.10-0.02)/0.2² = 2 > 1; levered (0.10-0.06)/0.2² = 1
+        # → invest exactly 1x: no borrowing, no idle cash.
         k = kelly_metrics(0.10, 0.20, margin_cost_rate=0.06, risk_free_rate=RF)
         assert k.kelly_fraction == pytest.approx(1.0)
         assert k.safe_kelly == pytest.approx(1.0)
         assert k.leveraged_return == pytest.approx(0.10)
+
+    def test_full_investment_beats_cash_when_borrowing_is_too_dear(self):
+        # μ=5%, σ=10%, rf=2%, margin=6%: the naive (μ-c)/σ² is negative and
+        # would park everything in cash — but an unlevered 1x allocation
+        # strictly beats cash. The piecewise rule must choose 1x.
+        k = kelly_metrics(0.05, 0.10, margin_cost_rate=0.06, risk_free_rate=RF)
+        assert k.safe_kelly == pytest.approx(1.0)
+        assert k.leveraged_return == pytest.approx(0.05)
 
     def test_borrowing_is_charged_only_above_one_x(self):
         # kelly = (0.12 - 0.04) / 0.2² = 2.0 → borrow 1x at 4%.
@@ -313,9 +362,18 @@ class TestKelly:
         assert k.safe_kelly == pytest.approx(2.0)
         assert k.leveraged_return == pytest.approx(2 * 0.12 - 1 * 0.04)
 
-    def test_negative_kelly_parks_capital_at_risk_free(self):
-        # Expected return below margin cost: do not lever; idle capital earns rf.
+    def test_thin_edge_stays_mostly_in_cash(self):
+        # Unlevered optimum (0.03-0.02)/0.3² ≈ 0.111: a sliver invested, the
+        # rest earning the risk-free rate.
         k = kelly_metrics(0.03, 0.30, margin_cost_rate=0.06, risk_free_rate=RF)
+        expected_fraction = (0.03 - RF) / 0.30**2
+        assert k.safe_kelly == pytest.approx(expected_fraction)
+        assert k.leveraged_return == pytest.approx(
+            expected_fraction * 0.03 + (1 - expected_fraction) * RF
+        )
+
+    def test_return_below_risk_free_parks_capital_at_risk_free(self):
+        k = kelly_metrics(0.01, 0.30, margin_cost_rate=0.06, risk_free_rate=RF)
         assert k.kelly_fraction < 0
         assert k.safe_kelly == 0.0
         assert k.leveraged_return == pytest.approx(RF)

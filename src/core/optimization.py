@@ -6,8 +6,9 @@ Supports three portfolio regimes:
 - ``long-short``      — shorts allowed with full use of proceeds: sum(w) = 1,
                         gross exposure sum(|w|) <= gross_limit (1.6 = "130/30",
                         2.0 = Reg-T margin).
-- ``market-neutral``  — dollar-neutral: sum(w) = 0, normalized so that gross
-                        exposure sum(|w|) = 1.
+- ``market-neutral``  — dollar-neutral: sum(w) = 0, scaled to gross exposure
+                        sum(|w|) = 1 where the per-asset caps allow (a binding
+                        cap leaves gross below 1, reported exactly).
 
 Shorts are modeled with the split-variable formulation ``w = w_long - w_short``
 (both halves non-negative), which keeps every exposure constraint *linear* —
@@ -17,7 +18,8 @@ documented source of silent convergence failures.
 The Sharpe ratio of a market-neutral portfolio uses the raw expected return
 (no risk-free subtraction): the portfolio is self-financing, so its return is
 already an excess return. Because the ratio is scale-invariant, the optimizer
-finds the best direction and then rescales gross exposure to exactly 1.
+finds the best direction and then scales gross exposure up toward 1, stopping
+early if a per-asset cap binds.
 """
 
 from __future__ import annotations
@@ -56,8 +58,8 @@ class OptimizerConfig:
         max_weight: per-asset cap on long weight (fraction of capital).
         max_short: per-asset cap on short weight, as a positive fraction.
         gross_limit: cap on sum(|w|). Only meaningful for long-short
-            (market-neutral portfolios are normalized to gross = 1, and
-            long-only portfolios have gross = 1 by construction).
+            (market-neutral portfolios are scaled toward gross = 1 within
+            the per-asset caps; long-only gross is 1 by construction).
         short_borrow_rate: annual borrow fee charged on short notional.
     """
 
@@ -142,22 +144,23 @@ class FrontierPoint:
 def tangency_portfolio(
     mean_returns: np.ndarray, cov_matrix: np.ndarray, risk_free_rate: float
 ) -> np.ndarray:
-    """Closed-form unconstrained max-Sharpe (tangency) weights.
+    """Closed-form budget-constrained max-Sharpe (tangency) weights.
 
-    t = Σ⁻¹(μ - rf·1) / |1'Σ⁻¹(μ - rf·1)|. Used as a warm start and as the
-    analytic ground truth in tests. The absolute value in the normalizer keeps
-    the orientation stable when the net of the unnormalized solution is
-    negative (the classic sign-flip pitfall of naive normalization).
+    t = Σ⁻¹(μ - rf·1) / 1'Σ⁻¹(μ - rf·1), valid only when the normalizer is
+    positive. A zero or negative normalizer means no fully-invested mix beats
+    the risk-free rate — dividing through anyway silently flips every sign
+    (the classic pitfall), so this raises instead. Used as a warm start and
+    as the analytic ground truth in tests.
     """
     excess = mean_returns - risk_free_rate
     raw = np.linalg.solve(cov_matrix, excess)
     denom = raw.sum()
-    if abs(denom) < _VOL_FLOOR:
+    if denom < _VOL_FLOOR:
         raise OptimizationError(
-            "tangency portfolio is undefined: net weight of the unconstrained "
-            "solution is zero (all assets have identical risk-adjusted excess returns?)"
+            "tangency portfolio does not exist on the efficient branch: "
+            "1'Σ⁻¹(μ - rf) <= 0, i.e. no fully-invested portfolio beats the risk-free rate"
         )
-    return raw / abs(denom)
+    return raw / denom
 
 
 class MeanVarianceOptimizer:
@@ -202,6 +205,8 @@ class MeanVarianceOptimizer:
                 f"infeasible: {self._n} assets with max_weight={self.config.max_weight} "
                 "cannot sum to 1; raise max_weight or add assets"
             )
+        if self.config.mode is OptimizationMode.MARKET_NEUTRAL and self._n < 2:
+            raise ConfigurationError("market-neutral portfolios need at least 2 assets")
 
     # ------------------------------------------------------------------ setup
 
@@ -262,6 +267,10 @@ class MeanVarianceOptimizer:
             }
         ]
         if cfg.allows_shorts:
+            # Inequality on purpose: gross *equality* is a nonconvex constraint
+            # (the boundary of the L1 ball) and makes SLSQP land in local
+            # minima. Market-neutral solutions are scaled up to unit gross
+            # afterwards, within the per-asset caps (see _clean_weights).
             constraints.append(
                 {"type": "ineq", "fun": lambda z: cfg.effective_gross_limit - z.sum()}
             )
@@ -280,8 +289,13 @@ class MeanVarianceOptimizer:
             direction = self.mean_returns - self.mean_returns.mean()
             gross = np.abs(direction).sum()
             if gross > _VOL_FLOOR:
-                starts.append(as_split(0.5 * direction / gross))
-            starts.append(np.zeros(2 * n))
+                starts.append(as_split(direction / gross))
+            # Balanced long/short split: long the above-average half, short the rest.
+            positive = direction >= 0
+            n_long, n_short = int(positive.sum()), int((~positive).sum())
+            if n_long and n_short:
+                balanced = np.where(positive, 0.5 / n_long, -0.5 / n_short)
+                starts.append(as_split(balanced))
         else:
             weight = min(1.0 / n, cfg.max_weight)
             starts.append(as_split(np.full(n, weight)))
@@ -351,7 +365,9 @@ class MeanVarianceOptimizer:
                 return False
         return True
 
-    def _finalize(self, z: np.ndarray) -> PortfolioResult:
+    def _clean_weights(self, z: np.ndarray) -> np.ndarray:
+        """Net weights from a solution: zero-clipped, cap-verified, and (for
+        market-neutral) gross-normalized without breaching per-asset caps."""
         cfg = self.config
         weights = self._weights_from(z)
         weights[np.abs(weights) < _ZERO_CLIP] = 0.0
@@ -363,15 +379,62 @@ class MeanVarianceOptimizer:
                     "market-neutral optimization converged to the zero portfolio; "
                     "expected returns may not differentiate the assets"
                 )
-            # The ratio objective is scale-invariant; pin gross exposure at 1.
-            weights = weights / gross
+            # The ratio objective is scale-invariant, so the solve fixes the
+            # direction; scale it up toward unit gross — but never past a
+            # per-asset cap. When a cap binds first, gross stays below 1 and
+            # is reported exactly as achieved.
+            if gross < 1.0 - _WEIGHT_TOL:
+                cap_headroom = np.min(
+                    np.where(
+                        weights > 0,
+                        cfg.max_weight / np.maximum(weights, _VOL_FLOOR),
+                        np.where(
+                            weights < 0, cfg.max_short / np.maximum(-weights, _VOL_FLOOR), np.inf
+                        ),
+                    )
+                )
+                scale = min(1.0 / gross, cap_headroom)
+                weights = weights * scale
+                if np.abs(weights).sum() < 1.0 - _WEIGHT_TOL:
+                    logger.info(
+                        "market-neutral gross exposure limited to %.2f by per-asset caps",
+                        np.abs(weights).sum(),
+                    )
 
+        self._verify_final_weights(weights)
+        return weights
+
+    def _verify_final_weights(self, weights: np.ndarray) -> None:
+        """Defense-in-depth: no result leaves the engine violating its regime."""
+        cfg = self.config
+        short_cap = cfg.max_short if cfg.allows_shorts else 0.0
+        violations: list[str] = []
+        if abs(weights.sum() - cfg.net_exposure_target) > 10 * _WEIGHT_TOL:
+            violations.append(f"net exposure {weights.sum():.6f} != {cfg.net_exposure_target}")
+        if np.abs(weights).sum() > cfg.effective_gross_limit + 10 * _WEIGHT_TOL:
+            violations.append(f"gross exposure {np.abs(weights).sum():.6f} above limit")
+        if (weights > cfg.max_weight + 10 * _WEIGHT_TOL).any():
+            violations.append("a long weight exceeds max_weight")
+        if (weights < -short_cap - 10 * _WEIGHT_TOL).any():
+            violations.append("a short weight exceeds max_short")
+        if violations:
+            raise OptimizationError(
+                "optimizer produced an invalid portfolio: " + "; ".join(violations)
+            )
+
+    def _metrics_from_weights(self, weights: np.ndarray) -> tuple[float, float]:
+        """Expected return (net of short borrow cost) and volatility."""
         shorts = np.clip(-weights, 0.0, None)
         expected_return = float(
             weights @ self.mean_returns - self.config.short_borrow_rate * shorts.sum()
         )
         variance = float(weights @ self.cov_matrix @ weights)
-        volatility = float(np.sqrt(max(variance, 0.0)))
+        return expected_return, float(np.sqrt(max(variance, 0.0)))
+
+    def _finalize(self, z: np.ndarray) -> PortfolioResult:
+        cfg = self.config
+        weights = self._clean_weights(z)
+        expected_return, volatility = self._metrics_from_weights(weights)
         if volatility < _VOL_FLOOR:
             raise OptimizationError("optimal portfolio has zero volatility; Sharpe is undefined")
         sharpe = (expected_return - cfg.effective_risk_free) / volatility
@@ -448,11 +511,11 @@ class MeanVarianceOptimizer:
                 logger.debug("skipping unreachable frontier target %.2f%%", target * 100)
                 continue
             previous = z
-            frontier.append(
-                FrontierPoint(
-                    expected_return=self._expected_return(z), volatility=self._volatility(z)
-                )
-            )
+            # Report from cleaned weights so every frontier point satisfies the
+            # same contract as max_sharpe (unit gross for market-neutral, caps).
+            weights = self._clean_weights(z)
+            expected_return, volatility = self._metrics_from_weights(weights)
+            frontier.append(FrontierPoint(expected_return=expected_return, volatility=volatility))
         if len(frontier) < 2:
             raise OptimizationError("efficient frontier collapsed: fewer than 2 feasible points")
         return frontier
@@ -486,16 +549,31 @@ def kelly_metrics(
 ) -> KellyMetrics:
     """Portfolio-level Kelly leverage.
 
-    kelly = (μ - c) / σ² where c is the margin borrow rate. The applied
-    ("safe") leverage is clamped to [0, leverage_cap]. Margin interest is
-    charged only on borrowed capital (leverage above 1); capital left
-    uninvested at leverage below 1 earns the risk-free rate.
+    The payoff is piecewise: below 1x leverage, uninvested capital earns the
+    risk-free rate (the hurdle is rf); above 1x, borrowed capital pays the
+    margin rate (the hurdle is c). The growth-optimal fraction must use the
+    same piecewise model, otherwise Kelly can recommend all-cash while an
+    unlevered allocation strictly beats cash:
+
+        f* = (μ - rf) / σ²            if that is <= 1  (no borrowing needed)
+        f* = (μ - c) / σ²             if that is >= 1  (borrowing pays)
+        f* = 1                        otherwise        (invest fully, don't borrow)
+
+    The applied ("safe") leverage clamps f* to [0, leverage_cap].
     """
     if volatility <= 0:
         raise DataValidationError(f"volatility must be positive, got {volatility}")
     if leverage_cap <= 0:
         raise ConfigurationError(f"leverage_cap must be positive, got {leverage_cap}")
-    kelly = (expected_return - margin_cost_rate) / volatility**2
+    variance = volatility**2
+    unlevered_optimum = (expected_return - risk_free_rate) / variance
+    levered_optimum = (expected_return - margin_cost_rate) / variance
+    if unlevered_optimum <= 1.0:
+        kelly = unlevered_optimum
+    elif levered_optimum >= 1.0:
+        kelly = levered_optimum
+    else:
+        kelly = 1.0
     safe = float(np.clip(kelly, 0.0, leverage_cap))
     borrowed = max(safe - 1.0, 0.0)
     idle = max(1.0 - safe, 0.0)

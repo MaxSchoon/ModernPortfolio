@@ -119,8 +119,8 @@ class TestEndToEndOptimization:
         target = 0.0 if mode is OptimizationMode.MARKET_NEUTRAL else 1.0
         assert result.net_exposure == pytest.approx(target, abs=1e-4)
         if mode is not OptimizationMode.LONG_ONLY:
-            # BBB trends down: shorting it should be used when allowed.
-            assert result.weights_by_ticker()["BBB"] < 0.01
+            # BBB trends down: a strictly negative weight, or shorting is broken.
+            assert result.weights_by_ticker()["BBB"] < -0.01
 
     def test_exclude_cash_removes_synthetics(self, tmp_path, price_history):
         analyzer = make_analyzer(tmp_path, ["AAA", "BBB", "CASH"], price_history[["AAA", "BBB"]])

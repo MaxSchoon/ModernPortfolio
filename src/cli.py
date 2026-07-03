@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-from src.core.exceptions import PortfolioError
+from src.core.exceptions import ConfigurationError, OptimizationError, PortfolioError
 from src.core.ModernPortfolio import SYNTHETIC_TICKERS, PortfolioAnalyzer
 from src.core.optimization import (
     FrontierPoint,
@@ -324,6 +324,10 @@ def run(args: argparse.Namespace) -> int:
         args.no_html_report = True
 
     # Validate strategy settings before any (slow, networked) data work.
+    if args.frontier_points < 2:
+        raise ConfigurationError(
+            f"--frontier-points must be at least 2, got {args.frontier_points}"
+        )
     config = OptimizerConfig(
         mode=args.mode,
         risk_free_rate=args.risk_free,
@@ -369,7 +373,9 @@ def run(args: argparse.Namespace) -> int:
     if not args.skip_plots or not args.no_html_report:
         try:
             frontier = optimizer.efficient_frontier(points=args.frontier_points)
-        except PortfolioError as exc:
+        except OptimizationError as exc:
+            # Numerical frontier failure degrades the report, not the run;
+            # configuration errors were already raised before any data work.
             logger.warning("efficient frontier unavailable: %s", exc)
 
     save_outputs(args.output_dir, result, analyzer)
