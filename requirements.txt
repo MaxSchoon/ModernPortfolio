@@ -10,7 +10,7 @@ matplotlib>=3.5.0
 yfinance>=0.2.3
 
 # Terminal UI improvements
-tqdm>=4.62.0       # Progress bars
+tqdm>=4.68.3       # Progress bars
 colorama>=0.4.6    # Colored terminal output
 
 # Optional - for Jupyter notebooks if used
