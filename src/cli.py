@@ -105,6 +105,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     strategy = parser.add_argument_group("strategy")
     strategy.add_argument(
+        "--optimizer",
+        choices=["mean-variance", "hrp"],
+        default="mean-variance",
+        help="allocation method: mean-variance (max Sharpe, supports all modes) "
+        "or hrp (Hierarchical Risk Parity — clustering-based, uses no return "
+        "forecasts, long-only by construction)",
+    )
+    strategy.add_argument(
         "--mode",
         type=OptimizationMode,
         choices=list(OptimizationMode),
@@ -213,7 +221,8 @@ def print_result(
         ("Gross exposure", f"{result.gross_exposure * 100:.1f}%"),
         (
             "Long / short",
-            f"{result.long_exposure * 100:.1f}% / {result.short_exposure * 100:.1f}%",
+            f"{round(result.long_exposure * 100, 1) + 0.0:.1f}% / "
+            f"{round(result.short_exposure * 100, 1) + 0.0:.1f}%",
         ),
         ("Risk-free rate", f"{risk_free_rate * 100:.2f}%"),
     ]
@@ -328,6 +337,20 @@ def run(args: argparse.Namespace) -> int:
         raise ConfigurationError(
             f"--frontier-points must be at least 2, got {args.frontier_points}"
         )
+    if args.optimizer == "hrp":
+        if args.mode is not OptimizationMode.LONG_ONLY:
+            raise ConfigurationError(
+                "HRP is long-only by construction (its recursive bisection only splits "
+                f"capital, never signs it); --mode {args.mode.value} requires "
+                "--optimizer mean-variance"
+            )
+        if args.max_weight != 1.0:
+            # Silently ignoring an explicit risk constraint would be worse
+            # than refusing: the user believes a cap is in force.
+            raise ConfigurationError(
+                "HRP does not support per-asset weight caps; drop --max-weight "
+                "or use --optimizer mean-variance"
+            )
     config = OptimizerConfig(
         mode=args.mode,
         risk_free_rate=args.risk_free,
@@ -361,7 +384,16 @@ def run(args: argparse.Namespace) -> int:
     analyzer.calculate_returns()
 
     optimizer = analyzer.build_optimizer(config, exclude_cash=args.exclude_cash)
-    result = optimizer.max_sharpe()
+    if args.optimizer == "hrp":
+        from src.core.hrp import HRPOptimizer
+
+        # Reuse the mean-variance engine's validated universe and covariance;
+        # the engine itself still provides the efficient frontier for context.
+        result = HRPOptimizer(
+            optimizer.tickers, optimizer.mean_returns, optimizer.cov_matrix, args.risk_free
+        ).allocate()
+    else:
+        result = optimizer.max_sharpe()
     kelly = kelly_metrics(
         result.expected_return,
         result.volatility,
@@ -393,17 +425,7 @@ def run(args: argparse.Namespace) -> int:
             kelly=kelly,
             returns_summary=analyzer.returns_summary,
             frontier=frontier,
-            run_config={
-                "Mode": args.mode.value,
-                "Years of history": args.years,
-                "Risk-free rate": f"{args.risk_free:.2%}",
-                "Margin cost": f"{args.margin_cost:.2%}",
-                "Short borrow rate": f"{args.borrow_rate:.2%}",
-                "Gross limit": args.gross_limit,
-                "Max weight": args.max_weight,
-                "Max short": args.max_short,
-                "Tickers file": str(args.tickers_file),
-            },
+            run_config=build_run_config(args),
             chart_paths=charts or None,
         )
         print(f"\n{style.dim}HTML report:{style.reset} {report_path}")
@@ -412,6 +434,32 @@ def run(args: argparse.Namespace) -> int:
         print_result(result, kelly, style, args.risk_free)
         print(f"\n{style.dim}Outputs in {args.output_dir}{style.reset}")
     return EXIT_OK
+
+
+def build_run_config(args: argparse.Namespace) -> dict:
+    """Report settings that actually applied to this run.
+
+    HRP takes no exposure constraints; listing them in its report would
+    claim limits that were never in force.
+    """
+    run_config = {
+        "Optimizer": args.optimizer,
+        "Mode": args.mode.value,
+        "Years of history": args.years,
+        "Risk-free rate": f"{args.risk_free:.2%}",
+        "Margin cost": f"{args.margin_cost:.2%}",
+        "Tickers file": str(args.tickers_file),
+    }
+    if args.optimizer == "mean-variance":
+        run_config.update(
+            {
+                "Short borrow rate": f"{args.borrow_rate:.2%}",
+                "Gross limit": args.gross_limit,
+                "Max weight": args.max_weight,
+                "Max short": args.max_short,
+            }
+        )
+    return run_config
 
 
 def standardize_cache_safely(analyzer: PortfolioAnalyzer, args: argparse.Namespace) -> None:

@@ -127,3 +127,16 @@ class TestEndToEndOptimization:
         analyzer.calculate_returns()
         optimizer = analyzer.build_optimizer(OptimizerConfig(), exclude_cash=True)
         assert "CASH" not in optimizer.tickers
+
+    def test_pipeline_feeds_hrp(self, tmp_path, price_history):
+        # Same estimated inputs must drive the HRP allocator to a valid,
+        # fully-invested long-only portfolio.
+        from src.core.hrp import HRPOptimizer
+
+        analyzer = make_analyzer(tmp_path, ["AAA", "BBB", "CCC"], price_history)
+        analyzer.calculate_returns()
+        mv = analyzer.build_optimizer(OptimizerConfig())
+        result = HRPOptimizer(mv.tickers, mv.mean_returns, mv.cov_matrix, 0.04).allocate()
+        assert result.net_exposure == pytest.approx(1.0, abs=1e-9)
+        assert (result.weights >= 0).all()
+        assert np.isfinite(result.sharpe)
