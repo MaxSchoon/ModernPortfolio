@@ -1,0 +1,39 @@
+[project]
+name = "modern-portfolio"
+version = "1.0.0"
+description = "Experimental Modern Portfolio Theory optimizer with long, short, and market-neutral support"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Max Schoon" }]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+]
+ignore = [
+    "E501", # line length is handled by the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy data-plumbing modules scheduled for their own cleanup pass; see
+# CONTRIBUTING.md. New code (core, reporting, CLI, tests) gets no exemptions.
+"src/cache/*" = ["B", "SIM", "E722"]
+"src/fetching/*" = ["B", "SIM", "E722"]
+"src/utils/*" = ["B", "SIM", "E722"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]

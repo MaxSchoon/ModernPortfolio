@@ -1,0 +1,67 @@
+name: Optimizer correctness
+description: Report numerical, financial, or constraint behavior that appears wrong.
+title: "[correctness] "
+labels: ["optimizer-correctness", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Use this when weights, constraints, risk metrics, returns, or optimizer
+        mode behavior appear numerically or financially wrong. Include enough
+        data to reproduce the result.
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Optimizer mode
+      options:
+        - Long-only
+        - Short-enabled
+        - Market-neutral
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Data to reproduce
+      description: Paste the ticker set, date range, risk-free rate, margin cost, cache state, or a small fixture.
+      placeholder: "Tickers: AAPL, MSFT, SPY; years: 3; risk-free: 0.035; margin-cost: 0.06"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed weights and metrics
+      description: Include weights, return, volatility, Sharpe ratio, Kelly sizing, or constraint output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected weights and metrics
+      description: Explain the expected result and the calculation, reference implementation, or financial constraint behind it.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: refutes
+    attributes:
+      label: What would refute the current behavior?
+      description: Name the invariant or check that should fail if the optimizer is wrong.
+      placeholder: "Example: market-neutral weights should sum to approximately 0.0 while gross exposure remains constrained."
+    validations:
+      required: false
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct.
+          required: true

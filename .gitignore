@@ -5,3 +5,6 @@ tickers_corrected.csv
 to-do.txt
 test_outputs/
 
+
+# Agent configuration and private skills — must never land on GitHub
+.agents/
