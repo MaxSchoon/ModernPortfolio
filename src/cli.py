@@ -209,7 +209,7 @@ def print_result(
         ("Expected return", f"{result.expected_return * 100:.2f}%"),
         ("Volatility", f"{result.volatility * 100:.2f}%"),
         ("Sharpe ratio", f"{result.sharpe:.2f}"),
-        ("Net exposure", f"{result.net_exposure * 100:.1f}%"),
+        ("Net exposure", f"{round(result.net_exposure * 100, 1) + 0.0:.1f}%"),
         ("Gross exposure", f"{result.gross_exposure * 100:.1f}%"),
         (
             "Long / short",
