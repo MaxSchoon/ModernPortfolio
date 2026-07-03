@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/MaxSchoon/ModernPortfolio/security/advisories/new
+    about: Do not open a public issue for a security vulnerability. Report it privately here.
+  - name: Questions and collaboration
+    url: https://github.com/MaxSchoon/ModernPortfolio/discussions
+    about: Ask usage questions or propose collaboration in Discussions.
+  - name: Support
+    url: https://github.com/MaxSchoon/ModernPortfolio/blob/main/SUPPORT.md
+    about: Read the support policy before opening an issue.

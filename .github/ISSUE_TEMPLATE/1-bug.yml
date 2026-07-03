@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a runtime failure, data-fetch problem, cache issue, or unexpected behavior.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Use this for runtime failures, data issues, cache problems, CLI
+        behavior, or report generation bugs. If the issue is mainly about
+        numerical or financial correctness, use the optimizer correctness
+        template instead.
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Optimizer mode
+      options:
+        - Long-only
+        - Short-enabled
+        - Market-neutral
+        - Not optimizer-specific
+    validations:
+      required: true
+  - type: textarea
+    id: tickers
+    attributes:
+      label: Ticker set
+      description: Paste the tickers or attach the smallest ticker file that reproduces the issue.
+      placeholder: "AAPL, MSFT, SPY"
+    validations:
+      required: false
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: Paste the exact command and any relevant environment variables.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Include the traceback, log output, generated file, or unexpected behavior.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "OS, Python version, package manager, fresh cache or existing cache"
+    validations:
+      required: false
+  - type: checkboxes
+    id: coc
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct.
+          required: true
