@@ -11,7 +11,7 @@ yfinance>=0.2.3
 
 # Terminal UI improvements
 tqdm>=4.62.0       # Progress bars
-colorama>=0.4.4    # Colored terminal output
+colorama>=0.4.6    # Colored terminal output
 
 # Optional - for Jupyter notebooks if used
 # jupyter>=1.0.0
